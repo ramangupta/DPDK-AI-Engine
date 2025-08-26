@@ -1,0 +1,60 @@
+Listing Devices 
+
+sudo dpdk-devbind.py -s
+
+
+Pick a NIC you want DPDK to control (not the one with your SSH/Internet!).
+
+Bind it to vfio-pci:
+
+sudo modprobe vfio-pci
+sudo dpdk-devbind.py -b vfio-pci 0000:03:00.0
+
+
+Tap traffic from wifi to tap0
+-----------------------------
+
+👉 sudo ip tuntap add mode tap user $USER name tap0
+
+ip tuntap add → tells Linux: “create a new TUN/TAP virtual network interface.”
+mode tap → we want a TAP device (Layer 2, Ethernet frames).
+(If we said mode tun, that would be Layer 3, IP packets only.)
+user $USER → assigns ownership of the device to your current user, so you don’t always need root to use it.
+($USER automatically expands to your username, e.g. oem.)
+name tap0 → sets the interface name explicitly to tap0.
+
+👉 After this command, a virtual interface tap0 exists, but it’s still DOWN (inactive).
+
+2️⃣ sudo ip link set tap0 up
+
+ip link set <iface> up → activates the interface (like plugging in a cable).
+Without this, tap0 exists but won’t pass traffic.
+
+👉 After this, tap0 behaves like any other NIC: it can be assigned an IP, bridged, or connected to DPDK.
+
+1️⃣ sudo tc qdisc add dev wlo1 ingress
+
+tc = traffic control tool in Linux (part of iproute2).
+qdisc = “queueing discipline”, defines how packets are processed on an interface.
+dev wlo1 ingress → attach an ingress qdisc to device wlo1 (your Wi-Fi card).
+
+👉 Ingress qdisc means: packets coming into wlo1 (from the air to your laptop) can be filtered/redirected.
+
+2️⃣ sudo tc filter add dev wlo1 parent ffff: \ ...
+            matchall action mirred egress mirror dev tap0
+            
+Now that we have an ingress hook, we add a filter:
+
+parent ffff: → special handle for ingress qdisc (always ffff:).
+
+matchall → matches all packets (you could instead match IP, port, etc. for selective mirroring).
+
+action mirred egress mirror dev tap0 →
+
+mirred = “mirror/redirect” action.
+
+egress mirror = send a copy of the packet to another device’s egress path.
+
+dev tap0 = the target device for mirrored packets.
+
+👉 So, every incoming packet on wlo1 gets copied and injected into tap0, as if tap0 received it normally.

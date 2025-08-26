@@ -1,0 +1,12 @@
+# Ignore build artifacts
+build/
+*.o
+*.log
+*.pcap
+
+# Editor junk
+*.swp
+*.swo
+*.tmp
+.DS_Store
+
