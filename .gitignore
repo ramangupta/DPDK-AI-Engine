@@ -3,6 +3,8 @@ build/
 *.o
 *.log
 *.pcap
+backup.c
+.vscode/
 
 # Editor junk
 *.swp
