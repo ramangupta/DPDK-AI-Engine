@@ -11,7 +11,9 @@ sources = [
   'parse_ipv6.c',
   'parse_l4.c',
   'parse_dns.c',
+  'stats.c',
   'utils.c',
+  'talkers.c',
 ]
 
 deps = []   # always initialize

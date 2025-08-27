@@ -4,9 +4,20 @@
 #include "parse_ipv4.h"
 #include "parse_l4.h"
 #include "utils.h"
+#include "talkers.h"
 
 void handle_ipv4(const struct rte_ipv4_hdr *ip4, uint16_t rem)
 {
+    char ipbuf[INET_ADDRSTRLEN];
+
+    // Source IP
+    inet_ntop(AF_INET, &ip4->src_addr, ipbuf, sizeof(ipbuf));
+    talkers_update(ipbuf, rte_be_to_cpu_16(ip4->total_length));
+
+    // Destination IP
+    inet_ntop(AF_INET, &ip4->dst_addr, ipbuf, sizeof(ipbuf));
+    talkers_update(ipbuf, rte_be_to_cpu_16(ip4->total_length));
+
     uint8_t ihl = (ip4->version_ihl & 0x0F) * 4;
     if (ihl < sizeof(struct rte_ipv4_hdr) || ihl > rem) {
         printf("      IPv4 <bad IHL>\n");

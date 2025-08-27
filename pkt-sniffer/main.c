@@ -1,5 +1,6 @@
 #include "capture.h"
 #include "parse_eth.h"
+#include "stats.h"
 
 int main(void) {
     if (capture_init() != 0) {
@@ -12,6 +13,8 @@ int main(void) {
         int len = capture_next(buf, sizeof(buf));
         if (len <= 0) continue;
         parse_packet(buf, (uint16_t)len);
+
+        stats_poll();
     }
 
     capture_close();

@@ -4,6 +4,7 @@
 #include "parse_ipv6.h"
 #include "parse_l4.h"
 #include "utils.h"
+#include "talkers.h"
 
 void parse_ipv6_extensions(const uint8_t *data, uint16_t len, uint8_t next_header)
 {
@@ -49,6 +50,14 @@ void handle_ipv6(const struct rte_ipv6_hdr *ip6, uint16_t pktlen)
         return;
     }
 
+    char ipbuf[INET6_ADDRSTRLEN];
+
+    inet_ntop(AF_INET6, &ip6->src_addr, ipbuf, sizeof(ipbuf));
+    talkers_update(ipbuf, rte_be_to_cpu_16(ip6->payload_len) + sizeof(*ip6));
+
+    inet_ntop(AF_INET6, &ip6->dst_addr, ipbuf, sizeof(ipbuf));
+    talkers_update(ipbuf, rte_be_to_cpu_16(ip6->payload_len) + sizeof(*ip6));
+    
     printf("      IPv6 ");
     print_ipv6_addr((const uint8_t *)&ip6->src_addr);
     printf(" → ");

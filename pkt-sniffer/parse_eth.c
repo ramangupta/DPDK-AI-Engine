@@ -7,6 +7,7 @@
 #include "parse_ipv6.h"
 #include "parse_l4.h"
 #include "utils.h"
+#include "stats.h"
 
 static void parse_ethernet(const struct rte_ether_hdr *eth, 
                            uint16_t pktlen, 
@@ -35,6 +36,7 @@ void parse_packet(const uint8_t *data, uint16_t pktlen)
     uint16_t rem = pktlen - sizeof(struct rte_ether_hdr);
 
     if (etype == RTE_ETHER_TYPE_IPV4) {
+        stats_update(PROTO_IPV4, pktlen);
         if (rem < sizeof(struct rte_ipv4_hdr)) {
             printf("      IPv4 <truncated>\n");
             return;
@@ -42,6 +44,7 @@ void parse_packet(const uint8_t *data, uint16_t pktlen)
         const struct rte_ipv4_hdr *ip4 = (const struct rte_ipv4_hdr*)p;
         handle_ipv4(ip4, rem);
     } else if (etype == RTE_ETHER_TYPE_IPV6) {
+        stats_update(PROTO_IPV6, pktlen);
         if (rem < sizeof(struct rte_ipv6_hdr)) {
             printf("      IPv6 <truncated>\n");
             return;

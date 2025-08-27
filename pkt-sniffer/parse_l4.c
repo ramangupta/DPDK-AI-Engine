@@ -9,6 +9,7 @@
 #include "parse_l4.h"
 #include "utils.h"
 #include "parse_dns.h"
+#include "stats.h"
 
 static const char* icmpv4_type_name(uint8_t t) {
     switch (t) {
@@ -144,6 +145,7 @@ static void parse_icmpv6(const uint8_t *p, uint16_t len) {
 void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
 {
     if (proto == IPPROTO_UDP) {
+        stats_update(PROTO_UDP, len);
         if (len < sizeof(struct rte_udp_hdr)) 
         { 
             printf("      UDP <truncated>\n"); 
@@ -157,6 +159,7 @@ void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
         const uint8_t *udp_payload = data + sizeof(*uh);
 
         if (paylen > 0 && (sport == 53 || dport == 53)) {
+            stats_update(PROTO_DNS, len);
             parse_dns_udp(udp_payload, paylen, /*is_response=*/(sport == 53));
         }
         
@@ -166,6 +169,7 @@ void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
             udplen, paylen);
 
     } else if (proto == IPPROTO_TCP) {
+        stats_update(PROTO_TCP, len);
         if (len < sizeof(struct rte_tcp_hdr)) { printf("      TCP <truncated>\n"); return; }
         const struct rte_tcp_hdr *th = (const struct rte_tcp_hdr*)data;
         uint8_t hlen = (th->data_off >> 4) * 4;
@@ -185,9 +189,11 @@ void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
         // If you ever want to peek payload: const uint8_t* payload = data + hlen; uint16_t paylen = len - hlen;
 
     } else if (proto == IPPROTO_ICMP) {
+        stats_update(PROTO_ICMP, len);
         parse_icmpv4(data, len);
 
     } else if (proto == IPPROTO_ICMPV6) {
+        stats_update(PROTO_ICMP, len);
         parse_icmpv6(data, len);
 
     } else {
