@@ -5,6 +5,8 @@
 DPDK-Stock-AI is not “just another packet sniffer.”
 It is a next-generation, ultra-low-latency analytics engine designed for financial markets and AI-driven decision-making.
 
+![Project Roadmap](./dpdk_stock_ai_roadmap.png)
+
 At its core, it combines:
 
  - DPDK-powered packet capture for millions of packets per second
@@ -51,6 +53,21 @@ A stock-market AI operating system built on packets.
  - Introduce AI/ML models for flow prediction & anomaly detection
  - Scale to multi-core, multi-node deployments
  - Deliver real-time dashboards for traders, researchers, and infra teams
+
+## Milestones
+
+| Phase | Focus Areas |
+|-------|-------------|
+| MVP (v0.1) | Core packet parsing, stats, talkers |
+| Phase 2 (v0.2) | Advanced protocols, frag/reassembly, latency |
+| Phase 3 (v0.5) | AI/ML analytics (anomaly detection, prediction) |
+| Phase 4 (v1.0) | Integrations & dashboards (Grafana, Kafka, REST API) |
+| Future | Security enhancements, LLM analysis, cluster mode |
+
+##  Contributing & Roadmap
+We manage tasks and roadmap via GitHub Projects:
+[📡 Project Board – Backlog & Priorities](https://github.com/users/ramangupta/projects/1)
+
 
 🌟 Our Mission
 
