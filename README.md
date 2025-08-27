@@ -1,31 +1,65 @@
-# pkt-sniffer
+# 📡 dpdk-stock-ai
 
-A lightweight packet sniffer with pluggable backends:  
-- **AF_PACKET** (default, works out of the box on Linux)  
-- **DPDK** (for high-performance packet capture, requires DPDK setup)  
-
-The sniffer parses **Ethernet, IPv4/IPv6, ICMP, UDP/TCP, and DNS**.
+A next-generation **packet sniffer + analytics engine** built with **DPDK**, designed for ultra-low-latency environments like **stock trading, market data analysis, and real-time monitoring**.  
+It combines **core packet capture**, **advanced analytics**, and **AI/ML-driven insights**.
 
 ---
 
-## 🔧 Build
+## ✨ Vision
+To build a **blazing fast, AI-powered packet engine** that can:
+- Capture packets at line-rate using DPDK
+- Provide deep protocol visibility (IPv4/IPv6, TCP/UDP, ICMP, DNS, and beyond)
+- Detect anomalies, track top talkers, and compute real-time network stats
+- Integrate with **trading systems** and **data pipelines** for actionable intelligence
 
-### Prerequisites
-- GCC / Clang
-- [Meson](https://mesonbuild.com/) + Ninja
-- (Optional) DPDK installed and configured
+---
 
-### Clone and build (default = AF_PACKET):
+## 🔑 Features (Work in Progress)
+
+### Core
+- ✅ Packet parsing (Ethernet, IPv4, IPv6, TCP, UDP, ICMP, DNS)
+- ✅ Realtime stats (pps, bps, per-protocol counts)
+- ✅ Top talkers (per source/destination IP)
+- ⬜ Fragmentation & reassembly
+- ⬜ CLI options & filters
+
+### Advanced
+- ⬜ Latency & jitter analysis
+- ⬜ Flow correlation (per connection tracking)
+- ⬜ Deep protocol inspection (HTTP, FIX, etc.)
+- ⬜ Encrypted traffic metadata analysis
+
+### AI/ML
+- ⬜ Traffic anomaly detection
+- ⬜ Market signal extraction from packet patterns
+- ⬜ Predictive load balancing & trading signals
+
+### Integrations
+- ⬜ Grafana dashboards (Prometheus metrics export)
+- ⬜ Kafka / ZeroMQ streaming
+- ⬜ PCAP replay & offline analysis
+
+---
+
+## 📅 Roadmap
+See full roadmap here: [docs/ROADMAP.md](docs/ROADMAP.md)
+
+---
+
+## ⚡ Quick Start
+
 ```bash
+# clone repo
 git clone https://github.com/ramangupta/dpdk-stock-ai.git
-cd dpdk-stock-ai/pkt-sniffer
-meson setup build -Dcapture_backend=afp
+cd dpdk-stock-ai
+
+# build
+meson build
 ninja -C build
 
-Build with DPDK backend:
+# run (example)
+sudo ./build/pkt-sniffer -l 0-1 -n 4 -- -i eth0
 
-meson setup build -Dcapture_backend=dpdk
-ninja -C build
 
 🚀 Run
 AF_PACKET
@@ -67,14 +101,6 @@ pkt-sniffer/
 ├── utils.c/h          # Helpers
 ├── meson.build
 └── meson_options.txt
-
-⚡ Roadmap
-
-Add more protocol parsers (ARP, HTTP, FIX for stock feeds 📈)
-
-Performance benchmarking (AF_PACKET vs DPDK)
-
-Integration with AI models for traffic classification
 
 📜 License
 
