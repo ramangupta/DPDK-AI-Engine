@@ -1,15 +1,33 @@
 // capture.h
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 
-// Return 0 on success, nonzero on failure
-int capture_init(void);
+typedef enum {
+    PV_KIND_STACK = 0,  // borrowed (owned by backend, e.g., static recv buffer)
+    PV_KIND_HEAP  = 1,  // heap we allocated via capture_alloc()
+    PV_KIND_MBUF  = 2   // DPDK mbuf (owned by backend)
+} pv_kind_t;
 
-// Capture a single packet, return length, or -1 on error/EOF
-// buf: caller-provided buffer
-// buflen: size of buffer
-// returns: number of bytes written to buf, or -1 if no more packets / error
-int capture_next(uint8_t *buf, uint16_t buflen);
+typedef struct pkt_view {
+    const uint8_t   *data;     // pointer to contiguous L2/L3 data
+    uint16_t   len;      // valid length
+    pv_kind_t  kind;     // how to free
+    void      *backing;  // heap ptr or rte_mbuf*
+} pkt_view;
 
-// Cleanup resources
+// Backend lifecycle
+int  capture_init(const char *pcap_file);
+pkt_view *capture_next(void);
+void capture_release(pkt_view *pv);
 void capture_close(void);
+
+// For reassembly or any buffer you need to create
+pkt_view* capture_alloc(size_t len); // returns heap-backed pkt_view
+pkt_view *capture_wrap(const uint8_t *data, size_t len);
+void capture_free(pkt_view *pv);
+
+#ifdef USE_DPDK
+#include <rte_mbuf.h>
+pkt_view *capture_from_mbuf(struct rte_mbuf *mbuf);
+#endif

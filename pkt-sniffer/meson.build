@@ -14,17 +14,22 @@ sources = [
   'stats.c',
   'utils.c',
   'talkers.c',
+  'frag_ipv4.c',
+  'capture_common.c',
 ]
 
-deps = []   # always initialize
+deps = []
 
-# Choose backend
 if capture_backend == 'afp'
-  sources += 'capture_afp.c'
-  deps += [dependency('pcap', required: true)]
+  sources += ['capture_afp.c', 'time_afp.c']
+  deps += [dependency('pcap')]
+elif capture_backend == 'pcap'
+  sources += ['capture_pcap.c', 'time_pcap.c']
+  deps += [dependency('pcap')]
 elif capture_backend == 'dpdk'
-  sources += 'capture_dpdk.c'
-  deps += [dependency('libdpdk', required: true)]
+  sources += ['capture_dpdk.c', 'time_dpdk.c']
+  deps += [dependency('libdpdk')]
+  add_project_arguments('-DUSE_DPDK', language: 'c')
 else
   error('Unsupported capture backend: ' + capture_backend)
 endif

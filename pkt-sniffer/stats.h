@@ -5,7 +5,6 @@
 
 #define REPORT_INTERVAL 5
 
-
 // Enum for protocol classification
 enum proto_type {
     PROTO_NONE,

@@ -1,4 +1,5 @@
 option('capture_backend', type: 'combo',
-       choices: ['afp', 'dpdk'],
+       choices: ['afp', 'dpdk', 'pcap'],
        value: 'afp',
-       description: 'Packet capture backend (afp = AF_PACKET, dpdk = DPDK)')
+       description: 'Packet capture backend (afp = AF_PACKET, dpdk = DPDK, pcap = offline pcap replay)')
+
