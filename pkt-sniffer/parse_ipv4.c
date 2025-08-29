@@ -11,6 +11,7 @@
 #include "talkers.h"
 #include "frag_ipv4.h"   // new module: buffering + reassembly
 #include "capture.h"     // for pkt_view
+#include "stats.h"
 
 void handle_ipv4(pkt_view *pv, uint64_t now)
 {
@@ -56,6 +57,8 @@ void handle_ipv4(pkt_view *pv, uint64_t now)
 
         // Free original fragment (it’s no longer needed)
         // capture_free(pv);
+        stats_record_frag(ip4->src_addr, ip4->dst_addr, 
+                          rte_be_to_cpu_16(ip4->packet_id));
 
         // Swap: work on reassembled
         pv  = full;
@@ -83,9 +86,26 @@ void handle_ipv4(pkt_view *pv, uint64_t now)
         ip4->next_proto_id, ihl, tot, ip4->time_to_live);
 
     // --- L4 ---
-    const uint8_t *l4 = (const uint8_t*)ip4 + ihl;
-    uint16_t l4len = (tot > ihl) ? (tot - ihl) : 0;
-    parse_l4(l4, l4len, ip4->next_proto_id);
+    // const uint8_t *l4 = (const uint8_t*)ip4 + ihl;
+    // uint16_t l4len = (tot > ihl) ? (tot - ihl) : 0;
+    char srcbuf[64], dstbuf[64];
+    snprintf(srcbuf, sizeof(srcbuf), "%u.%u.%u.%u",
+            ip4->src_addr & 0xff, (ip4->src_addr >> 8) & 0xff,
+            (ip4->src_addr >> 16) & 0xff, (ip4->src_addr >> 24) & 0xff);
+    snprintf(dstbuf, sizeof(dstbuf), "%u.%u.%u.%u",
+            ip4->dst_addr & 0xff, (ip4->dst_addr >> 8) & 0xff,
+            (ip4->dst_addr >> 16) & 0xff, (ip4->dst_addr >> 24) & 0xff);
+
+    pkt_view pv_l4 = {
+        .data   = (uint8_t*)ip4 + ihl,
+        .len    = (tot > ihl) ? (tot - ihl) : 0,
+        .src_port = 0, // will be filled later in parse_l4 if TCP/UDP
+        .dst_port = 0,
+    };
+    snprintf(pv_l4.src_ip, sizeof(pv_l4.src_ip), "%s", srcbuf);
+    snprintf(pv_l4.dst_ip, sizeof(pv_l4.dst_ip), "%s", dstbuf);
+
+    parse_l4(&pv_l4, ip4->next_proto_id);
 
     // Free if this was a reassembled buffer (AFP case)
     if (full) {

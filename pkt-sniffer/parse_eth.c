@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
+#include <rte_arp.h>
 #include "capture.h"      // for pkt_view
 #include "parse_eth.h"
 #include "parse_ipv4.h"
@@ -11,6 +12,7 @@
 #include "utils.h"
 #include "stats.h"
 #include "talkers.h"
+#include "parse_arp.h"
 
 static void parse_ethernet(const struct rte_ether_hdr *eth,
                            uint16_t pktlen,
@@ -40,7 +42,7 @@ void parse_packet(const pkt_view *pv, uint64_t now_tsc)
 
     parse_ethernet(eth, pktlen, etype);
 
-    const uint8_t *p = data + sizeof(struct rte_ether_hdr);
+    // const uint8_t *p = data + sizeof(struct rte_ether_hdr);
     uint16_t rem = pktlen - sizeof(struct rte_ether_hdr);
 
     if (etype == RTE_ETHER_TYPE_IPV4) {
@@ -60,10 +62,23 @@ void parse_packet(const pkt_view *pv, uint64_t now_tsc)
             printf("      IPv6 <truncated>\n");
             return;
         }
-        const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr*)p;
-        handle_ipv6(ip6, rem);
+        pkt_view ipview = {
+            .data = (uint8_t *)eth + sizeof(*eth),
+            .len  = pv->len - sizeof(*eth)
+        };
+        // const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr*)p;
+        handle_ipv6(&ipview, now_tsc);
     } else if (etype == RTE_ETHER_TYPE_ARP) {
-        printf("      ARP (not decoded)\n");
+        if (pv->len >= sizeof(*eth) + sizeof(struct rte_arp_hdr)) {
+            pkt_view arpview = {
+                .data = (uint8_t *)eth + sizeof(*eth),
+                .len  = pv->len - sizeof(*eth)
+            };
+            stats_update(PROTO_ARP, arpview.len);
+            handle_arp(&arpview);
+        } else {
+            printf("ARP <truncated>\n");
+        }
     } else if (etype == RTE_ETHER_TYPE_VLAN) {
         printf("      VLAN (not decoded in this sample)\n");
     } else {

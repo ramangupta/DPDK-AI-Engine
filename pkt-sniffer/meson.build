@@ -16,6 +16,10 @@ sources = [
   'talkers.c',
   'frag_ipv4.c',
   'capture_common.c',
+  'parse_arp.c',
+  'parse_dhcp.c',
+  'parse_http.c',
+  'parse_tls.c',
 ]
 
 deps = []
@@ -38,3 +42,18 @@ executable('pkt-sniffer',
            sources,
            dependencies: deps,
            install: true)
+
+
+# Print build-time hint
+message('==========================================================')
+message(' Selected capture backend: ' + capture_backend)
+if capture_backend == 'dpdk'
+  message(' Usage: sudo ./build/pkt-sniffer -l 0-1 -n 4 --vdev=...')
+  message(' Note: Requires a DPDK-supported NIC (not Wi-Fi).')
+elif capture_backend == 'afp'
+  message(' Usage: sudo ./build/pkt-sniffer --no-pci -vdev=net_af_packet0,iface=<ifname>')
+  message(' Example: sudo ./build/pkt-sniffer --no-pci -vdev=net_af_packet0,iface=wlo1')
+elif capture_backend == 'pcap'
+  message(' Usage: ./build/pkt-sniffer --pcap <file.pcap>')
+endif
+message('==========================================================')

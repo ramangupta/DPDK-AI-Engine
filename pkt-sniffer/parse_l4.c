@@ -10,6 +10,9 @@
 #include "utils.h"
 #include "parse_dns.h"
 #include "stats.h"
+#include "parse_dhcp.h"
+#include "parse_http.h"
+#include "parse_tls.h"
 
 static const char* icmpv4_type_name(uint8_t t) {
     switch (t) {
@@ -142,38 +145,46 @@ static void parse_icmpv6(const uint8_t *p, uint16_t len) {
     }
 }
 
-void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
+void parse_l4(pkt_view *pv, uint8_t proto)
 {
     if (proto == IPPROTO_UDP) {
-        stats_update(PROTO_UDP, len);
-        if (len < sizeof(struct rte_udp_hdr)) 
+        stats_update(PROTO_UDP, pv->len);
+        if (pv->len < sizeof(struct rte_udp_hdr)) 
         { 
             printf("      UDP <truncated>\n"); 
             return; 
         }
-        const struct rte_udp_hdr *uh = (const struct rte_udp_hdr*)data;
+        const struct rte_udp_hdr *uh = (const struct rte_udp_hdr*)pv->data;
         uint16_t udplen = rte_be_to_cpu_16(uh->dgram_len);
-        uint16_t paylen = (udplen >= sizeof(*uh) && udplen <= len) ? (udplen - sizeof(*uh)) : 0;
+        uint16_t paylen = (udplen >= sizeof(*uh) && udplen <= pv->len) ? (udplen - sizeof(*uh)) : 0;
         uint16_t sport = rte_be_to_cpu_16(uh->src_port);
         uint16_t dport = rte_be_to_cpu_16(uh->dst_port);
-        const uint8_t *udp_payload = data + sizeof(*uh);
+        const uint8_t *udp_payload = pv->data + sizeof(*uh);
 
         if (paylen > 0 && (sport == 53 || dport == 53)) {
-            stats_update(PROTO_DNS, len);
+            stats_update(PROTO_DNS, pv->len);
             parse_dns_udp(udp_payload, paylen, /*is_response=*/(sport == 53));
         }
         
+        if ((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) {
+            pkt_view dhcpview = {
+                .data = (uint8_t *)uh + sizeof(*uh),
+                .len  = udplen
+            };
+            handle_dhcp(&dhcpview);
+        }
+
         printf("      UDP %u → %u len=%u payload=%u\n",
             rte_be_to_cpu_16(uh->src_port),
             rte_be_to_cpu_16(uh->dst_port),
             udplen, paylen);
 
     } else if (proto == IPPROTO_TCP) {
-        stats_update(PROTO_TCP, len);
-        if (len < sizeof(struct rte_tcp_hdr)) { printf("      TCP <truncated>\n"); return; }
-        const struct rte_tcp_hdr *th = (const struct rte_tcp_hdr*)data;
+        stats_update(PROTO_TCP, pv->len);
+        if (pv->len < sizeof(struct rte_tcp_hdr)) { printf("      TCP <truncated>\n"); return; }
+        const struct rte_tcp_hdr *th = (const struct rte_tcp_hdr*)pv->data;
         uint8_t hlen = (th->data_off >> 4) * 4;
-        if (hlen < sizeof(struct rte_tcp_hdr) || hlen > len) {
+        if (hlen < sizeof(struct rte_tcp_hdr) || hlen > pv->len) {
             printf("      TCP <bad header len>\n");
             return;
         }
@@ -187,14 +198,36 @@ void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto)
         print_tcp_flags(th->tcp_flags);
         printf("\n");
         // If you ever want to peek payload: const uint8_t* payload = data + hlen; uint16_t paylen = len - hlen;
+        uint16_t payload_len = (pv->len > hlen) ? (pv->len - hlen) : 0;
+        const uint8_t *payload = (const uint8_t *)pv->data + hlen;
+
+        pkt_view app_pv = {
+            .data = (uint8_t *)payload,
+            .len  = payload_len,
+            .src_port = rte_be_to_cpu_16(th->src_port),
+            .dst_port = rte_be_to_cpu_16(th->dst_port),
+        };
+        // copy over IPs from parent pv
+        snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", pv->src_ip);
+        snprintf(app_pv.dst_ip, sizeof(app_pv.dst_ip), "%s", pv->dst_ip);
+
+        if (rte_be_to_cpu_16(th->src_port) == 80 || 
+            rte_be_to_cpu_16(th->dst_port) == 80) {
+            printf(" HTTP packet \n");
+            parse_http(&app_pv);
+        } else if (payload_len >= 5 && (rte_be_to_cpu_16(th->src_port) == 443 || 
+                   rte_be_to_cpu_16(th->dst_port) == 443)) {
+            printf(" TLS packet \n");
+            parse_tls(&app_pv);
+        }
 
     } else if (proto == IPPROTO_ICMP) {
-        stats_update(PROTO_ICMP, len);
-        parse_icmpv4(data, len);
+        stats_update(PROTO_ICMP, pv->len);
+        parse_icmpv4(pv->data, pv->len);
 
     } else if (proto == IPPROTO_ICMPV6) {
-        stats_update(PROTO_ICMP, len);
-        parse_icmpv6(data, len);
+        stats_update(PROTO_ICMP, pv->len);
+        parse_icmpv6(pv->data, pv->len);
 
     } else {
         printf("      L4 proto=%u (not decoded)\n", proto);

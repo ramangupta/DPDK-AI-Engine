@@ -58,7 +58,7 @@ pkt_view *capture_next(void) {
     uint16_t n = rte_eth_rx_burst(PORT_ID, 0, &m, BURST_SIZE);
     if (n == 0) return NULL;
 
-    return capture_from_mbuf(mbuf);
+    return capture_from_mbuf(m);
 }
 
 void capture_close(void) {
@@ -78,6 +78,7 @@ void capture_release(pkt_view *pv) {
     // PV_KIND_STACK: not used in DPDK backend
 }
 
+#if 0
 // For now, keep reassembly allocations simple: heap.
 // (We can optimize later to allocate mbufs and append)
 pkt_view* capture_alloc(size_t len) {
@@ -92,3 +93,4 @@ pkt_view* capture_alloc(size_t len) {
     p->backing = buf;
     return p;
 }
+#endif

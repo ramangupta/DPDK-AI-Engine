@@ -3,11 +3,31 @@
 #include <time.h>
 #include "stats.h"
 #include "talkers.h"
+#include <string.h>
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
 static uint64_t total_bytes = 0;
 static time_t last_report = 0;
+
+
+static struct dhcp_stat dhcp_table[MAX_DHCP];
+static int dhcp_count = 0;
+
+static struct arp_stat arp_table[MAX_ARP];
+static int arp_count = 0;
+
+static struct frag_stat frag_table[MAX_FRAG];
+static int frag_count = 0;
+
+static struct tls_stat tls_table[MAX_TLS];
+static int tls_count = 0;
+
+static struct dns_entry dns_table[DNS_MAX_ENTRIES];
+static int dns_count = 0;
+
+static http_session_t http_sessions[MAX_HTTP_SESSIONS];
+static int http_session_count = 0;
 
 void stats_update(enum proto_type p, uint16_t pktlen) {
     switch (p) {
@@ -17,12 +37,188 @@ void stats_update(enum proto_type p, uint16_t pktlen) {
     case PROTO_UDP:  global_stats.udp++;  break;
     case PROTO_ICMP: global_stats.icmp++; break;
     case PROTO_DNS:  global_stats.dns++;  break;
+    case PROTO_ARP:  global_stats.arp++;  break;
+    case PROTO_TLS_HANDSHAKE: global_stats.tls_handshake++; break; 
+    case PROTO_TLS_APPDATA:   global_stats.tls_appdata++;   break;
+    case PROTO_HTTP: global_stats.http++; break;
     default: break;
     }
 
     total_pkts++;
     total_bytes += pktlen;
 }
+
+void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip) {
+    if (dhcp_count < MAX_DHCP) {
+        dhcp_table[dhcp_count].xid = xid;
+        snprintf(dhcp_table[dhcp_count].msgtype, sizeof(dhcp_table[dhcp_count].msgtype), "%s", msgtype);
+        snprintf(dhcp_table[dhcp_count].yiaddr, sizeof(dhcp_table[dhcp_count].yiaddr), "%s", ip ? ip : "-");
+        dhcp_count++;
+    }
+}
+
+
+void stats_record_arp(const char *ip, const char *mac) {
+    if (!ip) return;
+    if (arp_count >= ARP_MAX_ENTRIES) return;
+
+    snprintf(arp_table[arp_count].ip, sizeof arp_table[arp_count].ip, "%s", ip);
+    if (mac) {
+        snprintf(arp_table[arp_count].mac, sizeof arp_table[arp_count].mac, "%s", mac);
+    } else {
+        snprintf(arp_table[arp_count].mac, sizeof arp_table[arp_count].mac, "-");  // placeholder
+    }
+    arp_count++;
+}
+
+
+void stats_record_frag(uint32_t src, uint32_t dst, uint16_t id) {
+    if (frag_count < MAX_FRAG) {
+        frag_table[frag_count].srcip = src;
+        frag_table[frag_count].dstip = dst;
+        frag_table[frag_count].id = id;
+        frag_table[frag_count].count++;
+        frag_count++;
+    }
+}
+
+void stats_record_dns_query(uint16_t id, const char *qname) {
+    if (!qname || !*qname) return;
+    if (dns_count >= DNS_MAX_ENTRIES) return;
+
+    // Create new entry
+    dns_table[dns_count].id = id;
+    snprintf(dns_table[dns_count].qname,
+             sizeof dns_table[dns_count].qname,
+             "%s", qname);
+    dns_table[dns_count].nanswers = 0;
+
+    // Put placeholder answer
+    snprintf(dns_table[dns_count].answers[0],
+             sizeof dns_table[dns_count].answers[0],
+             "-");
+    dns_table[dns_count].nanswers = 1;
+
+    dns_count++;
+}
+
+
+void stats_record_dns_answer(uint16_t id, const char *qname, const char *ans) {
+    if (!qname || !ans) return;
+
+    // Find matching entry by ID + qname
+    for (int i = 0; i < dns_count; i++) {
+        if (dns_table[i].id == id &&
+            strcmp(dns_table[i].qname, qname) == 0) {
+            // Dedup check
+            for (int j = 0; j < dns_table[i].nanswers; j++) {
+                if (strcmp(dns_table[i].answers[j], ans) == 0)
+                    return;
+            }
+
+            // Append answer if space
+            if (dns_table[i].nanswers < DNS_MAX_ANS) {
+                int n = dns_table[i].nanswers++;
+                snprintf(dns_table[i].answers[n],
+                         sizeof dns_table[i].answers[n],
+                         "%s", ans);
+            }
+            return;
+        }
+    }
+
+    // If no query entry, create one with this answer
+    if (dns_count < DNS_MAX_ENTRIES) {
+        dns_table[dns_count].id = id;
+        snprintf(dns_table[dns_count].qname,
+                 sizeof dns_table[dns_count].qname,
+                 "%s", qname);
+        snprintf(dns_table[dns_count].answers[0],
+                 sizeof dns_table[dns_count].answers[0],
+                 "%s", ans);
+        dns_table[dns_count].nanswers = 1;
+        dns_count++;
+    }
+}
+
+void stats_record_tls(const char *src, const char *dst,
+                      const char *sni, const char *alpn,
+                      const char *version, const char *cipher)
+{
+    if (tls_count < MAX_TLS) {
+        snprintf(tls_table[tls_count].src, sizeof(tls_table[tls_count].src), "%s", src);
+        snprintf(tls_table[tls_count].dst, sizeof(tls_table[tls_count].dst), "%s", dst);
+        snprintf(tls_table[tls_count].sni, sizeof(tls_table[tls_count].sni), "%s", sni ? sni : "-");
+        snprintf(tls_table[tls_count].alpn, sizeof(tls_table[tls_count].alpn), "%s", alpn ? alpn : "-");
+        snprintf(tls_table[tls_count].version, sizeof(tls_table[tls_count].version), "%s", version ? version : "-");
+        snprintf(tls_table[tls_count].cipher, sizeof(tls_table[tls_count].cipher), "%s", cipher ? cipher : "-");
+        tls_count++;
+    }
+}
+
+void stats_http_update(const char *src, const char *dst,
+                       const char *host, const char *method,
+                       const char *uri, const char *status,
+                       size_t bytes)
+{
+    // Find existing session
+    for (int i = 0; i < http_session_count; i++) {
+        http_session_t *s = &http_sessions[i];
+        if (strcmp(s->src, src) == 0 &&
+            strcmp(s->dst, dst) == 0) {
+            // Update counters
+            s->pkts++;
+            s->bytes += bytes;
+
+            if (host && *host) strncpy(s->host, host, sizeof(s->host)-1);
+            if (method && *method) strncpy(s->method, method, sizeof(s->method)-1);
+            if (uri && *uri) strncpy(s->uri, uri, sizeof(s->uri)-1);
+            if (status && *status) strncpy(s->status, status, sizeof(s->status)-1);
+            return;
+        }
+    }
+
+    // Otherwise create new
+    if (http_session_count < MAX_HTTP_SESSIONS) {
+        http_session_t *s = &http_sessions[http_session_count++];
+        memset(s, 0, sizeof(*s));
+        strncpy(s->src, src, sizeof(s->src)-1);
+        strncpy(s->dst, dst, sizeof(s->dst)-1);
+        if (host) strncpy(s->host, host, sizeof(s->host)-1);
+        if (method) strncpy(s->method, method, sizeof(s->method)-1);
+        if (uri) strncpy(s->uri, uri, sizeof(s->uri)-1);
+        if (status) strncpy(s->status, status, sizeof(s->status)-1);
+        s->pkts = 1;
+        s->bytes = bytes;
+    }
+}
+
+
+void stats_http_print(void)
+{
+    printf("\n=== HTTP Sessions ===\n");
+    for (int i = 0; i < http_session_count; i++) {
+        http_session_t *s = &http_sessions[i];
+
+        // Decide if it's request or response based on Method/Status
+        const char *tag = (s->method[0] != '\0') ? "[Req]" : "[Rsp]";
+
+        // First line: metadata summary
+        printf("  %-5s Method=%-6s URI=%-20s Status=%-20s pkts=%-4llu bytes=%-6llu\n",
+               tag,
+               s->method[0] ? s->method : "-",
+               s->uri[0] ? s->uri : "-",
+               s->status[0] ? s->status : "-",
+               (unsigned long long)s->pkts,
+               (unsigned long long)s->bytes);
+
+        // Second line: flow + host
+        printf("        %s → %s  Host=%s\n",
+               s->src, s->dst,
+               s->host[0] ? s->host : "-");
+    }
+}
+
 
 void stats_poll(void) {
     time_t now = time(NULL);
@@ -40,7 +236,8 @@ void stats_poll(void) {
 void stats_report(void) {
     uint64_t pkt_sum = global_stats.ipv4 + global_stats.ipv6 +
                        global_stats.tcp + global_stats.udp +
-                       global_stats.icmp + global_stats.dns;
+                       global_stats.icmp + global_stats.dns +
+                       global_stats.arp;
 
     double pps = (pkt_sum * 1.0) / REPORT_INTERVAL;
     double bps = (total_bytes * 1.0) / REPORT_INTERVAL;
@@ -48,19 +245,69 @@ void stats_report(void) {
     printf("\n=== Packet Summary (last %d s) ===\n", REPORT_INTERVAL);
     printf("Total=%lu (%.1f pkts/sec) Bandwidth=%.2f KB/s\n",
            pkt_sum, pps, bps / 1024.0);
-    printf("IPv4=%lu  IPv6=%lu  TCP=%lu  UDP=%lu  ICMP=%lu  DNS=%lu\n",
-           global_stats.ipv4, global_stats.ipv6,
-           global_stats.tcp, global_stats.udp,
-           global_stats.icmp, global_stats.dns);
+    printf("IPv4=%lu  IPv6=%lu  TCP=%lu  UDP=%lu  ICMP=%lu  DNS=%lu  ARP=%lu  TLS-HS=%lu  TLS-App=%lu  HTTP=%lu\n",
+            global_stats.ipv4, global_stats.ipv6,
+            global_stats.tcp, global_stats.udp,
+            global_stats.icmp, global_stats.dns,
+            global_stats.arp, global_stats.tls_handshake,
+            global_stats.tls_appdata, global_stats.http);
+
+
+    printf("\n=== DHCP Transactions ===\n");
+    for (int i=0; i<dhcp_count; i++) {
+        printf("xid=0x%x type=%s yiaddr=%s\n",
+            dhcp_table[i].xid,
+            dhcp_table[i].msgtype,
+            dhcp_table[i].yiaddr);
+    }
+
+    printf("\n=== DNS Transactions ===\n");
+    for (int i = 0; i < dns_count; i++) {
+        for (int j = 0; j < dns_table[i].nanswers; j++) {
+            printf("ID=0x%04x Q=%s A=%s\n",
+                dns_table[i].id,
+                dns_table[i].qname,
+                dns_table[i].answers[j]);
+        }
+    }
+
+
+    printf("\n=== ARP Seen ===\n");
+    for (int i=0; i<arp_count; i++) {
+        printf("%s is-at %s\n", arp_table[i].ip, arp_table[i].mac);
+    }
+
+    printf("\n=== IPv4 Fragments ===\n");
+    for (int i=0; i<frag_count; i++) {
+        printf("src=%u dst=%u id=%u count=%u\n",
+            frag_table[i].srcip, frag_table[i].dstip,
+            frag_table[i].id, frag_table[i].count);
+    }
+
+    stats_http_print();
+
+    printf("\n=== TLS Sessions ===\n");
+    for (int i=0; i<tls_count; i++) {
+        printf("%s → %s  SNI=%s  Version=%s  ALPN=%s  Cipher=%s\n",
+            tls_table[i].src, tls_table[i].dst,
+            tls_table[i].sni, tls_table[i].version,
+            tls_table[i].alpn, tls_table[i].cipher);
+    }
 
     printf("Cumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);
 
     // Reset interval counters
+    dhcp_count = dns_count = arp_count = frag_count = 0;
+
     global_stats.ipv4 = global_stats.ipv6 = global_stats.tcp =
-    global_stats.udp = global_stats.icmp = global_stats.dns = 0;
+    global_stats.udp = global_stats.icmp = global_stats.dns = 
+    global_stats.arp = 0;
+    global_stats.tls_handshake = global_stats.tls_appdata = 0;
+    global_stats.http = 0;
+    tls_count = 0;  
     total_bytes = 0;
 
-    talkers_sort_mode = SORT_BY_BYTES; 
+    talkers_sort_mode = SORT_BY_PKTS; 
     talkers_report();
     talkers_reset();
 }

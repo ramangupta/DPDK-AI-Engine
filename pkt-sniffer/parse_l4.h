@@ -2,7 +2,8 @@
 #define PARSE_L4_H
 
 #include <stdint.h>
+#include "capture.h"
 
-void parse_l4(const uint8_t *data, uint16_t len, uint8_t proto);
+void parse_l4(pkt_view *pv, uint8_t proto);
 
 #endif

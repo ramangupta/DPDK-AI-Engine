@@ -2,8 +2,21 @@
 #define STATS_H
 
 #include <stdint.h>
+#include <netinet/in.h>
+#include "capture.h"
 
 #define REPORT_INTERVAL 5
+#define MAX_DHCP 64
+#define MAX_DNS  64
+#define MAX_ARP  64
+#define MAX_FRAG 64
+#define MAX_NAME_LEN 256
+#define MAX_ANSWERS 4
+#define MAX_TLS 64
+#define DNS_MAX_ANS 8
+#define DNS_MAX_ENTRIES 1024
+#define MAX_HTTP_SESSIONS 1024
+#define ARP_MAX_ENTRIES 64
 
 // Enum for protocol classification
 enum proto_type {
@@ -13,7 +26,11 @@ enum proto_type {
     PROTO_TCP,
     PROTO_UDP,
     PROTO_ICMP,
-    PROTO_DNS
+    PROTO_DNS,
+    PROTO_ARP,
+    PROTO_TLS_HANDSHAKE,
+    PROTO_TLS_APPDATA,
+    PROTO_HTTP
 };
 
 // Define stats structure
@@ -24,12 +41,89 @@ struct stats {
     uint64_t udp;
     uint64_t icmp;
     uint64_t dns;
+    uint64_t arp;
+    uint64_t tls_handshake;
+    uint64_t tls_appdata;
+    uint64_t http;
 };
+
+// DHCP transaction
+struct dhcp_stat {
+    uint32_t xid;
+    char msgtype[16];
+    char yiaddr[16];
+};
+
+// DNS transaction
+struct dns_stat {
+    char qname[256];
+    char answer[256];
+};
+
+// ARP stat
+struct arp_stat {
+    char ip[16];
+    char mac[18];
+};
+
+// IPv4 fragmentation
+struct frag_stat {
+    uint32_t srcip;
+    uint32_t dstip;
+    uint16_t id;
+    uint16_t count;
+};
+
+struct tls_stat {
+    char src[64];
+    char dst[64];
+    char sni[128];
+    char alpn[64];
+    char version[16];
+    char cipher[64];
+};
+
+struct dns_entry {
+    uint16_t id;
+    char qname[256];
+    char answers[DNS_MAX_ANS][46]; // each answer string (IPv4/IPv6/CNAME)
+    int nanswers;
+};
+
+typedef struct {
+    char src[64];
+    char dst[64];
+    char host[128];
+    char method[16];
+    char uri[128];
+    char status[16];
+    uint64_t pkts;
+    uint64_t bytes;
+} http_session_t;
 
 // Function prototypes
 
 void stats_update(enum proto_type p, uint16_t pktlen);
 void stats_poll(void);   // <--- new
 void stats_report(void); // prints only
+
+// Flow-specific recorders
+void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip);
+void stats_record_arp(const char *ip, const char *mac);
+void stats_record_frag(uint32_t src, uint32_t dst, uint16_t id);
+void stats_record_tls(const char *src, const char *dst,
+                      const char *sni, const char *alpn,
+                      const char *version, const char *cipher);
+
+void stats_record_dns_query(uint16_t id, const char *qname);
+void stats_record_dns_answer(uint16_t id, const char *qname, const char *answer);
+void stats_report_dns(void);
+
+void stats_http_update(const char *src, const char *dst,
+                       const char *host, const char *method,
+                       const char *uri, const char *status,
+                       size_t bytes);
+
+void stats_http_print(void);
 
 #endif

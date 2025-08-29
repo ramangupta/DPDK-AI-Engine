@@ -37,15 +37,17 @@ void parse_ipv6_extensions(const uint8_t *data, uint16_t len, uint8_t next_heade
 
         } else {
             // reached L4 header
-            parse_l4(ptr, remaining, nh);
+            // parse_l4(ptr, remaining, nh);
             return;
         }
     }
 }
 
-void handle_ipv6(const struct rte_ipv6_hdr *ip6, uint16_t pktlen)
+void handle_ipv6(pkt_view *pv, uint64_t now)
 {
-    if (pktlen < sizeof(struct rte_ipv6_hdr)) {
+    const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr*)pv->data;
+
+    if (pv->len < sizeof(struct rte_ipv6_hdr)) {
         printf("      IPv6 <truncated>\n");
         return;
     }
@@ -65,7 +67,7 @@ void handle_ipv6(const struct rte_ipv6_hdr *ip6, uint16_t pktlen)
     printf(" next=%u hlim=%u\n", ip6->proto, ip6->hop_limits);
 
     const uint8_t *payload = (const uint8_t*)(ip6 + 1);
-    uint16_t plen = pktlen - sizeof(struct rte_ipv6_hdr);
+    uint16_t plen = pv->len - sizeof(struct rte_ipv6_hdr);
 
     parse_ipv6_extensions(payload, plen, ip6->proto);
 }

@@ -12,6 +12,10 @@ typedef enum {
 typedef struct pkt_view {
     const uint8_t   *data;     // pointer to contiguous L2/L3 data
     uint16_t   len;      // valid length
+    char     src_ip[64];
+    char     dst_ip[64];
+    uint16_t src_port;
+    uint16_t dst_port;
     pv_kind_t  kind;     // how to free
     void      *backing;  // heap ptr or rte_mbuf*
 } pkt_view;
