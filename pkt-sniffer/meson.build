@@ -15,11 +15,16 @@ sources = [
   'utils.c',
   'talkers.c',
   'frag_ipv4.c',
+  'frag_ipv6.c',
   'capture_common.c',
   'parse_arp.c',
   'parse_dhcp.c',
   'parse_http.c',
   'parse_tls.c',
+  'cli.c',
+  'filter.c',
+  'pcap_writer.c',
+  'sniffer_signal.c',
 ]
 
 deps = []

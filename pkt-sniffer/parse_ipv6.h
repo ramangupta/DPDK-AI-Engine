@@ -5,6 +5,12 @@
 #include <rte_ip.h>
 #include "capture.h"
 
+typedef struct {
+    const uint8_t *l4_ptr;
+    uint16_t l4_len;
+    uint8_t  l4_proto;
+} ipv6_ext_result_t;
+
 /* IPv6 parsing entry point */
 void handle_ipv6(pkt_view *pv, uint64_t now);
 

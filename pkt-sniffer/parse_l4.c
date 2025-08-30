@@ -169,7 +169,9 @@ void parse_l4(pkt_view *pv, uint8_t proto)
         if ((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) {
             pkt_view dhcpview = {
                 .data = (uint8_t *)uh + sizeof(*uh),
-                .len  = udplen
+                .len  = udplen,
+                .src_port = sport,
+                .dst_port = dport,
             };
             handle_dhcp(&dhcpview);
         }
