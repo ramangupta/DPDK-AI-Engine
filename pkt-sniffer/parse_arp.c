@@ -4,14 +4,14 @@
 #include "parse_arp.h"
 #include "stats.h"   // make sure it's included
 
-void handle_arp(const pkt_view *pv)
+void handle_arp(pkt_view *pv_full, const pkt_view *pv_slice)
 {
-    if (pv->len < sizeof(struct rte_arp_hdr)) {
+    if (pv_slice->len < sizeof(struct rte_arp_hdr)) {
         printf("      ARP <truncated>\n");
         return;
     }
 
-    const struct rte_arp_hdr *arp = (const struct rte_arp_hdr *)pv->data;
+    const struct rte_arp_hdr *arp = (const struct rte_arp_hdr *)pv_slice->data;
 
     // Convert addresses safely
     char sip[INET_ADDRSTRLEN] = {0};
@@ -20,6 +20,11 @@ void handle_arp(const pkt_view *pv)
         snprintf(sip, sizeof(sip), "?");
     if (!inet_ntop(AF_INET, &arp->arp_data.arp_tip, tip, sizeof(tip)))
         snprintf(tip, sizeof(tip), "?");
+
+    if (!inet_ntop(AF_INET, &arp->arp_data.arp_sip, pv_full->src_ip, sizeof(pv_full->src_ip)))
+        snprintf(pv_full->src_ip, sizeof(pv_full->src_ip), "?");
+    if (!inet_ntop(AF_INET, &arp->arp_data.arp_tip, pv_full->dst_ip, sizeof(pv_full->dst_ip)))
+        snprintf(pv_full->dst_ip, sizeof(pv_full->dst_ip), "?");
 
     // Convert MAC
     char mac[32];
@@ -30,6 +35,24 @@ void handle_arp(const pkt_view *pv)
              arp->arp_data.arp_sha.addr_bytes[3],
              arp->arp_data.arp_sha.addr_bytes[4],
              arp->arp_data.arp_sha.addr_bytes[5]);
+
+    snprintf(pv_full->src_mac, sizeof(pv_full->src_mac),
+                 "%02x:%02x:%02x:%02x:%02x:%02x",
+                 arp->arp_data.arp_sha.addr_bytes[0],
+                 arp->arp_data.arp_sha.addr_bytes[1],
+                 arp->arp_data.arp_sha.addr_bytes[2],
+                 arp->arp_data.arp_sha.addr_bytes[3],
+                 arp->arp_data.arp_sha.addr_bytes[4],
+                 arp->arp_data.arp_sha.addr_bytes[5]);
+
+    snprintf(pv_full->dst_mac, sizeof(pv_full->dst_mac),
+                 "%02x:%02x:%02x:%02x:%02x:%02x",
+                 arp->arp_data.arp_tha.addr_bytes[0],
+                 arp->arp_data.arp_tha.addr_bytes[1],
+                 arp->arp_data.arp_tha.addr_bytes[2],
+                 arp->arp_data.arp_tha.addr_bytes[3],
+                 arp->arp_data.arp_tha.addr_bytes[4],
+                 arp->arp_data.arp_tha.addr_bytes[5]);
 
     switch (ntohs(arp->arp_opcode)) {
     case RTE_ARP_OP_REQUEST:

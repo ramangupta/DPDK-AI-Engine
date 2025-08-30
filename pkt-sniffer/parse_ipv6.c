@@ -10,7 +10,8 @@
 
 // ---------------- IPv6 Extensions Parsing ----------------
 void parse_ipv6_extensions(const uint8_t *data, uint16_t len,
-                           uint8_t next_header, pkt_view *pv,
+                           uint8_t next_header, pkt_view *pv_full,
+                           pkt_view *pv_slice,
                            uint64_t now)
 {
     const uint8_t *ptr = data;
@@ -45,17 +46,17 @@ void parse_ipv6_extensions(const uint8_t *data, uint16_t len,
                 int more_frags = (frag_off & 0x1) != 0;
                 uint32_t offset = (frag_off & 0xfff8) << 3;
 
-                pkt_view *full = frag_reass_ipv6(ptr, pv, offset, more_frags, now);
+                pkt_view *full = frag_reass_ipv6(ptr, pv_slice, offset, more_frags, now);
                 if (!full) {
                     printf("IPv6 fragment buffered\n");
                     return; // wait for more fragments
                 }
 
                 // Replace pv with reassembled packet
-                pv = full;
-                ptr = pv->data + sizeof(struct rte_ipv6_hdr);
-                remaining = pv->len - sizeof(struct rte_ipv6_hdr);
-                nh = ((struct rte_ipv6_hdr*)pv->data)->proto;
+                pv_slice = full;
+                ptr = pv_slice->data + sizeof(struct rte_ipv6_hdr);
+                remaining = pv_slice->len - sizeof(struct rte_ipv6_hdr);
+                nh = ((struct rte_ipv6_hdr*)pv_slice->data)->proto;
                 printf("IPv6 reassembled\n");
                 continue;
             }
@@ -66,29 +67,29 @@ void parse_ipv6_extensions(const uint8_t *data, uint16_t len,
 
         } else {
             // reached L4 header
-            parse_l4(pv, nh);
+            parse_l4(pv_full, pv_slice);
             return;
         }
     }
 }
 
 // ---------------- Handle IPv6 ----------------
-void handle_ipv6(pkt_view *pv, uint64_t now)
+void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 {
-    if (pv->len < sizeof(struct rte_ipv6_hdr)) {
+    if (pv_slice->len < sizeof(struct rte_ipv6_hdr)) {
         printf("      IPv6 <truncated>\n");
         return;
     }
 
-    const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr*)pv->data;
+    const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr*)pv_slice->data;
 
     // Fill pkt_view src/dst IPs
-    inet_ntop(AF_INET6, &ip6->src_addr, pv->src_ip, sizeof(pv->src_ip));
-    inet_ntop(AF_INET6, &ip6->dst_addr, pv->dst_ip, sizeof(pv->dst_ip));
-
-    // Update talkers
-    talkers_update(pv->src_ip, rte_be_to_cpu_16(ip6->payload_len) + sizeof(*ip6));
-    talkers_update(pv->dst_ip, rte_be_to_cpu_16(ip6->payload_len) + sizeof(*ip6));
+    inet_ntop(AF_INET6, &ip6->src_addr, pv_slice->src_ip, sizeof(pv_slice->src_ip));
+    inet_ntop(AF_INET6, &ip6->dst_addr, pv_slice->dst_ip, sizeof(pv_slice->dst_ip));
+    inet_ntop(AF_INET6, &ip6->src_addr, pv_full->src_ip, sizeof(pv_full->src_ip));
+    inet_ntop(AF_INET6, &ip6->dst_addr, pv_full->dst_ip, sizeof(pv_full->dst_ip));
+    pv_slice->l4_proto = ip6->proto;
+    pv_full->l4_proto = ip6->proto;
 
     printf("      IPv6 ");
     print_ipv6_addr((const uint8_t *)&ip6->src_addr);
@@ -98,7 +99,7 @@ void handle_ipv6(pkt_view *pv, uint64_t now)
 
     // Walk extension headers, handle fragment, and parse L4
     const uint8_t *payload = (const uint8_t*)(ip6 + 1);
-    uint16_t plen = pv->len - sizeof(struct rte_ipv6_hdr);
+    uint16_t plen = pv_slice->len - sizeof(struct rte_ipv6_hdr);
 
-    parse_ipv6_extensions(payload, plen, ip6->proto, pv, now);
+    parse_ipv6_extensions(payload, plen, ip6->proto, pv_full, pv_slice, now);
 }

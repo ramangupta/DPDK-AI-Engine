@@ -12,6 +12,6 @@ typedef struct {
 } ipv6_ext_result_t;
 
 /* IPv6 parsing entry point */
-void handle_ipv6(pkt_view *pv, uint64_t now);
+void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now);
 
 #endif // PARSE_IPV6_H

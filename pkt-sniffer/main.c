@@ -7,8 +7,10 @@
 #include "frag_ipv4.h"
 #include "cli.h"
 #include "filter.h"
+#include "talkers.h"
 #include "pcap_writer.h"
 #include "sniffer_signal.h"
+#include "utils.h"
 
 // Main packet processing loop
 int main(int argc, char **argv) 
@@ -42,6 +44,12 @@ int main(int argc, char **argv)
 
                 // Parse the packet (this may do frag/reassembly internally)
                 parse_packet(pv, now);
+
+                // Just for extreme debugging ...
+                // pkt_view_dump(pv);
+
+                /* Top Talkers Update */ 
+                talkers_update(pv);
 
                 // Update stats/talkers
                 stats_poll();

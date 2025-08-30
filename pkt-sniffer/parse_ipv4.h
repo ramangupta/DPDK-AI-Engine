@@ -6,6 +6,6 @@
 #include "capture.h"
 
 // Handle IPv4 packet (already points past Ethernet header)
-void handle_ipv4(pkt_view *pv, uint64_t now);
+void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now);
 
 #endif

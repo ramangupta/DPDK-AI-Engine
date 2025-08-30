@@ -13,11 +13,10 @@
 #include "capture.h"     // for pkt_view
 #include "stats.h"
 
-void handle_ipv4(pkt_view *pv, uint64_t now)
+void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 {
-    const struct rte_ipv4_hdr *ip4 = (const struct rte_ipv4_hdr *)pv->data;
-    uint16_t rem = pv->len;
-    char ipbuf[INET_ADDRSTRLEN];
+    const struct rte_ipv4_hdr *ip4 = (const struct rte_ipv4_hdr *)pv_slice->data;
+    uint16_t rem = pv_slice->len;
 
     if (rem < sizeof(struct rte_ipv4_hdr)) {
         printf("      IPv4 <truncated>\n");
@@ -46,7 +45,7 @@ void handle_ipv4(pkt_view *pv, uint64_t now)
 
     pkt_view *full = NULL;
     if (more_frags || offset > 0) {
-        full = frag_reass_ipv4(ip4, pv, now);  // returns full pkt_view if done
+        full = frag_reass_ipv4(ip4, pv_slice, now);  // returns full pkt_view if done
         if (!full) {
             printf("IPv4 fragment buffered (id=%u)\n",
                     rte_be_to_cpu_16(ip4->packet_id));
@@ -61,21 +60,15 @@ void handle_ipv4(pkt_view *pv, uint64_t now)
                           rte_be_to_cpu_16(ip4->packet_id));
 
         // Swap: work on reassembled
-        pv  = full;
-        ip4 = (const struct rte_ipv4_hdr*)pv->data;
-        rem = pv->len;
+        pv_slice  = full;
+        ip4 = (const struct rte_ipv4_hdr*)pv_slice->data;
+        rem = pv_slice->len;
 
         // >>> IMPORTANT: recompute tot from the reassembled header
         tot = rte_be_to_cpu_16(ip4->total_length);
         printf("IPv4 reassembled (id=%u len=%u)\n",
-               rte_be_to_cpu_16(ip4->packet_id), pv->len);
+               rte_be_to_cpu_16(ip4->packet_id), pv_slice->len);
     }
-
-    // --- Talkers update ---
-    inet_ntop(AF_INET, &ip4->src_addr, ipbuf, sizeof(ipbuf));
-    talkers_update(ipbuf, tot);
-    inet_ntop(AF_INET, &ip4->dst_addr, ipbuf, sizeof(ipbuf));
-    talkers_update(ipbuf, tot);
 
     // --- Print header ---
     printf("      IPv4 ");
@@ -99,13 +92,20 @@ void handle_ipv4(pkt_view *pv, uint64_t now)
     pkt_view pv_l4 = {
         .data   = (uint8_t*)ip4 + ihl,
         .len    = (tot > ihl) ? (tot - ihl) : 0,
+        .l3_proto = pv_slice->l3_proto,
+        .l4_proto = ip4->next_proto_id,
         .src_port = 0, // will be filled later in parse_l4 if TCP/UDP
         .dst_port = 0,
     };
     snprintf(pv_l4.src_ip, sizeof(pv_l4.src_ip), "%s", srcbuf);
     snprintf(pv_l4.dst_ip, sizeof(pv_l4.dst_ip), "%s", dstbuf);
 
-    parse_l4(&pv_l4, ip4->next_proto_id);
+    snprintf(pv_full->src_ip, sizeof(pv_full->src_ip), "%s", srcbuf);
+    snprintf(pv_full->dst_ip, sizeof(pv_full->dst_ip), "%s", dstbuf);
+    pv_full->l3_proto = pv_l4.l3_proto;
+    pv_full->l4_proto = pv_l4.l4_proto;
+
+    parse_l4(pv_full, &pv_l4);
 
     // Free if this was a reassembled buffer (AFP case)
     if (full) {

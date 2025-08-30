@@ -14,8 +14,12 @@ typedef struct pkt_view {
     uint16_t   len;      // valid length
     char     src_ip[64];
     char     dst_ip[64];
+    char     src_mac[32];   // NEW
+    char     dst_mac[32];   // NEW
     uint16_t src_port;
     uint16_t dst_port;
+    uint8_t l4_proto;        // e.g. IPPROTO_TCP, UDP, ICMP
+    int l3_proto;            // AF_INET, AF_INET6, ETH_P_ARP
     pv_kind_t  kind;     // how to free
     void      *backing;  // heap ptr or rte_mbuf*
 } pkt_view;
