@@ -1,4 +1,4 @@
-// time.h
+// tsc.h
 #pragma once
 #include <stdint.h>
 

@@ -121,7 +121,7 @@ typedef struct {
 // Function prototypes
 
 void stats_update(enum proto_type p, uint16_t pktlen);
-void stats_poll(void);   // <--- new
+void stats_poll(uint64_t now_tsc);
 void stats_report(void); // prints only
 
 // Flow-specific recorders

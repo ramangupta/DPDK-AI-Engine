@@ -46,3 +46,14 @@ void pkt_view_dump(const pkt_view *pv) {
 
     printf("=========================\n\n");
 }
+
+void format_bandwidth(double bps, char *buf, size_t buflen) {
+    if (bps > 1e9)
+        snprintf(buf, buflen, "%.2f Gbps", bps / 1e9);
+    else if (bps > 1e6)
+        snprintf(buf, buflen, "%.2f Mbps", bps / 1e6);
+    else if (bps > 1e3)
+        snprintf(buf, buflen, "%.2f Kbps", bps / 1e3);
+    else
+        snprintf(buf, buflen, "%.0f bps", bps);
+}

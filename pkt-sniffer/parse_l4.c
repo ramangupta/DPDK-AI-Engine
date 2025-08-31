@@ -13,6 +13,9 @@
 #include "parse_dhcp.h"
 #include "parse_http.h"
 #include "parse_tls.h"
+#include "tcp_reass.h"
+#include "flows.h"
+
 
 static const char* icmpv4_type_name(uint8_t t) {
     switch (t) {
@@ -145,8 +148,43 @@ static void parse_icmpv6(const uint8_t *p, uint16_t len) {
     }
 }
 
+static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
+                                 const uint8_t *data, uint32_t len,
+                                 time_t ts, void *user_ctx)
+{
+    // build an app-level pkt_view and call HTTP/TLS parsers
+    pkt_view app_pv = {0};
+    app_pv.data = (uint8_t*)data;
+    app_pv.len = len;
+
+    // set ports and copy ip strings from flow
+    // tcp_reass stores strings; we need them — cast flow to known struct
+    // but tcp_flow_t is opaque in header; we can rely on flow->src_ip etc here because it's same compile unit
+    // safer: modify tcp_reass.h to expose minimal getters; for now assume the struct fields exist.
+    // If you prefer, copy ip/ports as user_ctx when invoking tcp_reass_process_segment.
+
+    // For simplicity: call HTTP/TLS based on ports — attempt both directions (port 80/443)
+    // We'll not set src/dst printable fields here; parse_http/parse_tls only need app_pv.data/len in many cases.
+    // Decide parser by checking if data looks like HTTP (starts with alphachar) or TLS (0x16 handshake)
+    if (len > 0) {
+        if (data[0] == 0x16 && len >= 5) {
+            // TLS record likely
+            parse_tls(&app_pv);
+        } else {
+            // crude HTTP detection: methods are letters (GET/POST/PUT/HEAD/OPTIONS)
+            if ((data[0] >= 'A' && data[0] <= 'Z') || memcmp(data, "HTTP/", 5) == 0) {
+                parse_http(&app_pv);
+            } else {
+                // otherwise, no-op or future app parsers
+            }
+        }
+    }
+}
+
 void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
 {
+    flow_key_t fkey;
+
     if (pv_slice->l4_proto == IPPROTO_UDP) {
         stats_update(PROTO_UDP, pv_slice->len);
         if (pv_slice->len < sizeof(struct rte_udp_hdr)) 
@@ -163,6 +201,12 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
 
         pv_full->src_port = sport;
         pv_full->dst_port = dport;
+
+        flow_key_build(&fkey, (pv_full->l3_proto == AF_INET6) ? 6 : 4, 
+                       pv_full->src_ip, pv_full->dst_ip,
+                       IPPROTO_UDP, sport, dport);
+
+        flow_update(&fkey, pv_slice->len);
 
         if (paylen > 0 && (sport == 53 || dport == 53)) {
             stats_update(PROTO_DNS, pv_slice->len);
@@ -219,15 +263,19 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
         pv_full->src_port = app_pv.src_port;
         pv_full->dst_port = app_pv.dst_port;
 
-        if (rte_be_to_cpu_16(th->src_port) == 80 || 
-            rte_be_to_cpu_16(th->dst_port) == 80) {
-            printf(" HTTP packet \n");
-            parse_http(&app_pv);
-        } else if (payload_len >= 5 && (rte_be_to_cpu_16(th->src_port) == 443 || 
-                   rte_be_to_cpu_16(th->dst_port) == 443)) {
-            printf(" TLS packet \n");
-            parse_tls(&app_pv);
-        }
+        flow_key_build(&fkey, (pv_full->l3_proto == AF_INET6) ? 6 : 4, 
+                       pv_full->src_ip, pv_full->dst_ip,
+                       IPPROTO_TCP, pv_full->src_port, pv_full->dst_port);
+
+        flow_update(&fkey, pv_slice->len);
+
+        // call reassembler
+        tcp_reass_process_segment(pv_full->src_ip, pv_full->dst_ip,
+                          pv_full->src_port, pv_full->dst_port,
+                          payload, payload_len,
+                          rte_be_to_cpu_32(th->sent_seq),
+                          th->tcp_flags, time(NULL),
+                          parse_tcp_deliver_cb, NULL);
 
     } else if (pv_slice->l4_proto == IPPROTO_ICMP) {
         stats_update(PROTO_ICMP, pv_slice->len);

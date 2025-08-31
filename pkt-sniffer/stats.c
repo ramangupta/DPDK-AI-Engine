@@ -5,13 +5,13 @@
 #include "talkers.h"
 #include <string.h>
 #include <arpa/inet.h>   // for inet_ntop
-
+#include "tcp_reass.h"
+#include "flows.h"
+#include "utils.h"
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
 static uint64_t total_bytes = 0;
-static time_t last_report = 0;
-
 
 static struct dhcp_stat dhcp_table[MAX_DHCP];
 static int dhcp_count = 0;
@@ -292,17 +292,40 @@ void stats_http_print(void)
     }
 }
 
+void stats_poll(uint64_t now_tsc) {
+    static uint64_t last_report = 0;
+    static uint64_t last_maint  = 0;
+    uint64_t now_sec;
+    uint64_t now_ns;
 
-void stats_poll(void) {
-    time_t now = time(NULL);
+#ifdef USE_DPDK
+    uint64_t hz = rte_get_tsc_hz();
+    now_sec = now_tsc / hz;
+    now_ns  = (now_tsc * 1000000000ULL) / hz;  // convert cycles → ns
+#else
+    now_sec = now_tsc / 1000000000ULL;  // convert ns → sec
+    now_ns  = now_tsc;                  // already ns
+#endif
+
     if (last_report == 0) {
-        last_report = now;
+        last_report = now_sec;
+        last_maint  = now_sec;
         return;
     }
 
-    if (now - last_report >= REPORT_INTERVAL) {
+    if (now_sec - last_report >= REPORT_INTERVAL) {
         stats_report();
-        last_report = now;
+        last_report = now_sec;
+    }
+
+    if (now_sec - last_maint >= 1) {
+        // Expire old flows (pass nanoseconds!)
+        flow_expire(now_ns);
+
+        // TCP reassembly maintenance can stay on seconds
+        tcp_reass_periodic_maintenance(now_sec);
+
+        last_maint = now_sec;
     }
 }
 
@@ -315,17 +338,6 @@ static void format_bytes(uint64_t bytes, char *buf, size_t buflen) {
         snprintf(buf, buflen, "%.2f KB", bytes / 1024.0);
     else
         snprintf(buf, buflen, "%lu B", bytes);
-}
-
-static void format_bandwidth(double bps, char *buf, size_t buflen) {
-    if (bps > 1e9)
-        snprintf(buf, buflen, "%.2f Gbps", bps / 1e9);
-    else if (bps > 1e6)
-        snprintf(buf, buflen, "%.2f Mbps", bps / 1e6);
-    else if (bps > 1e3)
-        snprintf(buf, buflen, "%.2f Kbps", bps / 1e3);
-    else
-        snprintf(buf, buflen, "%.0f bps", bps);
 }
 
 void stats_report(void) {
@@ -445,6 +457,8 @@ void stats_report(void) {
         proto_stats[p].pkts_interval = 0;
         proto_stats[p].bytes_interval = 0;
     }
+
+    flow_report();
 
     printf("\nCumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);
 

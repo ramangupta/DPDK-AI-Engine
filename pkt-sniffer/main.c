@@ -11,6 +11,7 @@
 #include "pcap_writer.h"
 #include "sniffer_signal.h"
 #include "utils.h"
+#include "tcp_reass.h"
 
 // Main packet processing loop
 int main(int argc, char **argv) 
@@ -20,6 +21,7 @@ int main(int argc, char **argv)
 
     cli_parse(argc, argv);
     setup_signal_handlers();
+    tcp_reass_init();
 
     if (pcap_writer_init() != 0) {
         return 1;
@@ -46,7 +48,7 @@ int main(int argc, char **argv)
                 talkers_update(pv);
 
                 // Update stats/talkers
-                stats_poll();
+                stats_poll(now);
 
                 pcap_writer_write(pv->data, pv->len);
             }
@@ -63,5 +65,6 @@ int main(int argc, char **argv)
     fflush(stderr);
     capture_close();
     pcap_writer_close();
+    tcp_reass_fini();
     return 0;
 }

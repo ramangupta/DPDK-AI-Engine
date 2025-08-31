@@ -25,6 +25,8 @@ sources = [
   'filter.c',
   'pcap_writer.c',
   'sniffer_signal.c',
+  'tcp_reass.c',
+  'flows.c',
 ]
 
 deps = []
