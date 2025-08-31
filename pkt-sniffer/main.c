@@ -17,7 +17,6 @@ int main(int argc, char **argv)
 {
     pkt_view *pv = NULL;
     filter_pktview_t fpv;
-    const char *pcap_file = NULL;
 
     cli_parse(argc, argv);
     setup_signal_handlers();
@@ -26,16 +25,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--pcap") == 0 && i + 1 < argc) {
-            pcap_file = argv[++i];
-        }
-    }
-
-    if (capture_init(pcap_file) != 0) {
+    if (capture_init(g_filters.read_pcap ? g_filters.read_file : NULL) != 0) {
         fprintf(stderr, "Failed to init capture\n");
         return 1;
     }
+
 
     while ((pv = capture_next()) != NULL) {
         uint64_t now = now_tsc();

@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "talkers.h"
 #include "frag_ipv4.h"   // new frag reassembly API
+#include "stats.h"
 
 // ---------------- IPv6 Extensions Parsing ----------------
 void parse_ipv6_extensions(const uint8_t *data, uint16_t len,
@@ -42,18 +43,30 @@ void parse_ipv6_extensions(const uint8_t *data, uint16_t len,
 
             // --- Handle Fragment Header ---
             if (nh == IPPROTO_FRAGMENT) {
-                uint16_t frag_off = rte_be_to_cpu_16(*(uint16_t*)(ptr + 2));
-                int more_frags = (frag_off & 0x1) != 0;
-                uint32_t offset = (frag_off & 0xfff8) << 3;
 
-                pkt_view *full = frag_reass_ipv6(ptr, pv_slice, offset, more_frags, now);
+                const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr *)pv_slice->data;
+                const struct rte_ipv6_frag_hdr *fh = (const struct rte_ipv6_frag_hdr *)ptr;
+                uint32_t frag_id = rte_be_to_cpu_32(fh->identification);
+                uint16_t raw_off = rte_be_to_cpu_16(fh->fragment_offset); // fragment_offset field in header
+                uint32_t off = (raw_off & 0xFFF8);           // offset in bytes
+                int more_frags = (raw_off & 0x1);
+
+                pkt_view *full = frag_reass_ipv6(ptr, pv_slice, now);
                 if (!full) {
                     printf("IPv6 fragment buffered\n");
+                    stats_record_ipv6_frag((const uint8_t *)&ip6->src_addr,
+                                           (const uint8_t *)&ip6->dst_addr,
+                                           frag_id, off, more_frags, now, 0);
                     return; // wait for more fragments
                 }
 
+                stats_record_ipv6_frag((const uint8_t *)&ip6->src_addr,
+                                       (const uint8_t *)&ip6->dst_addr,
+                                       frag_id, off, more_frags, now, 1);
+
                 // Replace pv with reassembled packet
                 pv_slice = full;
+                pv_full = full;
                 ptr = pv_slice->data + sizeof(struct rte_ipv6_hdr);
                 remaining = pv_slice->len - sizeof(struct rte_ipv6_hdr);
                 nh = ((struct rte_ipv6_hdr*)pv_slice->data)->proto;

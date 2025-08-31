@@ -14,6 +14,7 @@ static struct option long_opts[] = {
     {"ip",         required_argument, 0, 'i'},  // IPv4/IPv6 literal
     {"host",       required_argument, 0, 'H'},  // substring match
     {"write-pcap", required_argument, 0, 'w'},  // PCAP support
+    {"pcap",       required_argument, 0, 'r'},
     {"help",       no_argument,       0, 'h'},
     {0,0,0,0}
 };
@@ -137,6 +138,11 @@ void cli_parse(int argc, char **argv) {
             g_filters.write_file[sizeof(g_filters.write_file) - 1] = '\0';
             break;
 
+        case 'r':   // --pcap
+            g_filters.read_pcap = true;
+            strncpy(g_filters.read_file, optarg, sizeof(g_filters.read_file));
+            break;
+            
         case '?': // unknown option; skip
         default:
             // let DPDK handle it later

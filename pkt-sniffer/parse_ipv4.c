@@ -37,11 +37,11 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
     int more_frags = frag_off & RTE_IPV4_HDR_MF_FLAG;
     int offset     = (frag_off & RTE_IPV4_HDR_OFFSET_MASK) << 3;
 
-    printf("[ipv4] saw packet id=%u, total_length=%u, ihl=%u, proto=%u\n",
-           rte_be_to_cpu_16(ip4->packet_id),
-           rte_be_to_cpu_16(ip4->total_length),
-           (ip4->version_ihl & 0x0F) * 4,
-           ip4->next_proto_id);
+    // printf("[ipv4] saw packet id=%u, total_length=%u, ihl=%u, proto=%u\n",
+    //    rte_be_to_cpu_16(ip4->packet_id),
+    //    rte_be_to_cpu_16(ip4->total_length),
+    //    (ip4->version_ihl & 0x0F) * 4,
+    //    ip4->next_proto_id);
 
     pkt_view *full = NULL;
     if (more_frags || offset > 0) {
@@ -51,13 +51,15 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
                     rte_be_to_cpu_16(ip4->packet_id));
             // done, but still need to free original fragment
             // capture_free(pv);
+            stats_record_frag(ip4->src_addr, ip4->dst_addr, 
+                          rte_be_to_cpu_16(ip4->packet_id), 0);
             return;
         }
 
         // Free original fragment (it’s no longer needed)
         // capture_free(pv);
         stats_record_frag(ip4->src_addr, ip4->dst_addr, 
-                          rte_be_to_cpu_16(ip4->packet_id));
+                          rte_be_to_cpu_16(ip4->packet_id), 1);
 
         // Swap: work on reassembled
         pv_slice  = full;

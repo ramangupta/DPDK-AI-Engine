@@ -18,6 +18,8 @@
 #define MAX_HTTP_SESSIONS 1024
 #define ARP_MAX_ENTRIES 64
 
+enum ip_version { IPV4 = 4, IPV6 = 6 };
+
 // Enum for protocol classification
 enum proto_type {
     PROTO_NONE,
@@ -66,12 +68,16 @@ struct arp_stat {
     char mac[18];
 };
 
-// IPv4 fragmentation
+// Fragmentation
 struct frag_stat {
-    uint32_t srcip;
-    uint32_t dstip;
-    uint16_t id;
-    uint16_t count;
+    enum ip_version version;   // new field
+    uint32_t srcip;   // For IPv4
+    uint32_t dstip;   // For IPv4
+    uint8_t src6[16]; // For IPv6
+    uint8_t dst6[16]; // For IPv6
+    uint32_t id;               // Fragment ID
+    uint32_t count;            // Fragments received so far
+    int done;
 };
 
 struct tls_stat {
@@ -110,7 +116,6 @@ void stats_report(void); // prints only
 // Flow-specific recorders
 void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip);
 void stats_record_arp(const char *ip, const char *mac);
-void stats_record_frag(uint32_t src, uint32_t dst, uint16_t id);
 void stats_record_tls(const char *src, const char *dst,
                       const char *sni, const char *alpn,
                       const char *version, const char *cipher);
@@ -125,5 +130,12 @@ void stats_http_update(const char *src, const char *dst,
                        size_t bytes);
 
 void stats_http_print(void);
+
+void stats_record_frag(uint32_t src, uint32_t dst, 
+                       uint16_t id, int complete);
+void stats_record_ipv6_frag(const uint8_t *src6, const uint8_t *dst6,
+                            uint32_t id, uint16_t frag_off,
+                            int more_frags, uint64_t now,
+                            int complete);
 
 #endif

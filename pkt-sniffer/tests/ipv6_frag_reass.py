@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 IPv6 Fragmentation / Reassembly Test Harness
-Run: python3 ipv6_frag_reass.py
-Inspect PCAP: tcpdump -nn -vvv -r frags6.pcap
+Run: python3 tests/ipv6_frag_reass.py
 """
 
 from scapy.all import *
-import subprocess, re
+from scapy.layers.inet6 import IPv6ExtHdrFragment
+from scapy.layers.l2 import Ether
+import subprocess
 
 # ---------------- L2/L3 constants ----------------
 SRC_MAC = "d4:d8:53:5d:ab:d8"
@@ -14,76 +15,82 @@ DST_MAC = "ff:ff:ff:ff:ff:ff"
 
 SRC = "2001:db8::1"
 DST = "2001:db8::2"
-PROTO = 17  # UDP
 
-# ---------------------------- Helpers ----------------------------
-def udp_pkt6(payload_size, ident, offset=0, mflag=1):
-    """Generate a single IPv6/UDP packet fragment payload"""
-    data = b"X" * payload_size
-    udp = UDP(sport=1111, dport=2222)
-    ip6 = IPv6(src=SRC, dst=DST, fl=0) / udp / Raw(load=data)
-    return ip6
-
-def make_udp_frags6(ident, payload_len, fragsize):
-    data = b"B" * payload_len
-    udp = UDP(sport=1111, dport=2222)
-    pkt = IPv6(src=SRC, dst=DST) / udp / Raw(data)  
-    frags = fragment6(pkt, fragSize=1000) # returns a list of IPv6 fragments
+# -----------------------------------------------------------
+# Helper: use Scapy's fragment6 (keeps first fragment having upper header)
+# -----------------------------------------------------------
+def make_frags6(payload_len, frag_size, ident, sport=1111, dport=2222):
+    """Return a list of IPv6 fragments (mf set until last). Uses UDP as UL proto."""
+    pkt = IPv6(src=SRC, dst=DST) / UDP(sport=sport, dport=dport) / Raw(b"A" * payload_len)
+    # scapy.fragment6(packet, fragSize) returns list of fragments
+    frags = fragment6(pkt, fragSize=frag_size)
+    # ensure frag id matches our requested ident (scapy auto-generates id)
+    # replace id field in all fragments if ident was provided
+    for f in frags:
+        if IPv6ExtHdrFragment in f:
+            f[IPv6ExtHdrFragment].id = ident
     return frags
 
-# ---------------------------- Generate test cases ----------------------------
+# -----------------------------------------------------------
+# Build test cases (robust sizes so we can pick specific fragments)
+# -----------------------------------------------------------
 pkts = []
 
-# 1) Happy-path large payload
-payload = b"A"*2000
-frags = fragment6(IPv6(src=SRC,dst=DST)/UDP(sport=1111,dport=2222)/Raw(payload), fragSize=1000)
+# 1) Normal in-order fragments (1800 split into 3x600)
+frags = make_frags6(1800, 600, 1000)
+print(f"[DEBUG] In-order: got {len(frags)} fragments")
 pkts.extend(frags)
 
-# 2) Out-of-order fragments
-frags = make_udp_frags6(1001, 3000, 1000)
-pkts.extend([frags[2], frags[0], frags[1], frags[3]])
+# 2) Out-of-order delivery (1600 split into 4x400)
+frags = make_frags6(1600, 400, 1001)
+print(f"[DEBUG] Out-of-order: got {len(frags)} fragments")
+# shuffle order (2,0,1,3)
+if len(frags) >= 4:
+    pkts.extend([frags[2], frags[0], frags[1], frags[3]])
+else:
+    pkts.extend(frags)
 
-# 3) Overlap
-pkts.extend([
-    udp_pkt6(1480, ident=1002, offset=0),
-    udp_pkt6(600,  ident=1002, offset=1400),
-])
+# 3) Missing fragment (hole) → intentionally drop middle fragment
+frags = make_frags6(1600, 400, 1003)
+print(f"[DEBUG] Missing: got {len(frags)} fragments")
+if len(frags) >= 4:
+    pkts.extend([frags[0], frags[2], frags[3]])  # skip frag[1]
+else:
+    pkts.extend(frags)
 
-# 4) Missing fragment (hole)
-frags = make_udp_frags6(1003, 4000, 1000)
-pkts.extend([frags[0], frags[2], frags[3]])
+# 4) Small last fragment (ensures last frag shorter)
+frags = make_frags6(1600, 500, 1002)
+print(f"[DEBUG] Small-last: got {len(frags)} fragments")
+pkts.extend(frags)  # include all fragments (including small last)
 
-# 5) Small last fragment
-frags = make_udp_frags6(1004, 2021, 1000)
-pkts.extend(frags)
+# 5) Duplicate last fragment
+frags = make_frags6(1600, 500, 1004)
+print(f"[DEBUG] Dup-last: got {len(frags)} fragments")
+if frags:
+    pkts.extend(frags + [frags[-1]])  # duplicate last
+else:
+    pkts.extend(frags)
 
-# 6) Duplicate last fragment
-pkts.extend([
-    udp_pkt6(500, ident=1005, offset=0),
-    udp_pkt6(500, ident=1005, offset=500),
-    udp_pkt6(400, ident=1005, offset=500),
-])
+# 6) Larger payload stress (2000 split into ~600)
+frags = make_frags6(2000, 600, 1005)
+print(f"[DEBUG] Large payload: got {len(frags)} fragments")
+if len(frags) >= 4:
+    pkts.extend([frags[1], frags[0], frags[2], frags[3]])
+else:
+    pkts.extend(frags)
 
-# ---------------------------- Wrap in Ethernet ----------------------------
-from scapy.layers.l2 import Ether
-
-frames = [Ether(src=SRC_MAC, dst=DST_MAC)/f for f in pkts]
+# -----------------------------------------------------------
+# Wrap fragments in Ethernet frames (important)
+# -----------------------------------------------------------
+frames = [ Ether(src=SRC_MAC, dst=DST_MAC) / f for f in pkts ]
 
 pcap_name = "frags6.pcap"
 wrpcap(pcap_name, frames)
-print(f"Generated {pcap_name} with {len(frames)} Ethernet/IPv6 frames")
+print(f"[DEBUG] Wrote {len(frames)} Ethernet/IPv6 fragments to {pcap_name}")
 
-# ---------------------------- Expected outcomes ----------------------------
-expected = {
-    1000: "reassembled",
-    1001: "reassembled",
-    1002: "reassembled",
-    1003: "drop",
-    1004: "reassembled",
-    1005: "reassembled",
-}
-
-# ---------------------------- Run pkt-sniffer ----------------------------
+# -----------------------------------------------------------
+# Run pkt-sniffer reading the PCAP
+# -----------------------------------------------------------
 proc = subprocess.Popen(
     ["./build/pkt-sniffer", "--pcap", pcap_name],
     stdout=subprocess.PIPE,
@@ -99,28 +106,24 @@ for line in proc.stdout:
 
 proc.wait()
 
-# ---------------------------- Analyze results ----------------------------
-results = {}
-for line in lines:
-    m = re.search(r"IPv6 (fragment buffered|reassembled)", line)
-    if m:
-        action = m.group(1)
-        # Extract ID if printed in your C harness logs
-        id_match = re.search(r"id=(\d+)", line)
-        if id_match:
-            ident = int(id_match.group(1))
-            if "reassembled" in action:
-                results[ident] = "reassembled"
-            continue
-    # Alternatively, match your "[frag] id=..." log line
-    m2 = re.search(r"\[frag\] id=(\d+) complete!", line)
-    if m2:
-        ident = int(m2.group(1))
-        results[ident] = "reassembled"
+# -----------------------------------------------------------
+# Define test cases for reporting
+# -----------------------------------------------------------
+tests_def = [
+    ("In-order",       "id=1000", True),   # should reassemble
+    ("Out-of-order",   "id=1001", True),   # should reassemble
+    ("Missing",        "id=1003", False),  # should NOT reassemble
+    ("Small-last",     "id=1002", True),   # should reassemble
+    ("Dup-last",       "id=1004", True),   # should reassemble
+    ("Large payload",  "id=1005", True),   # should reassemble
+]
 
-# ---------------------------- Check expectations ----------------------------
-print("\n=== Test Results ===")
-for ident, exp in expected.items():
-    got = results.get(ident, "drop")
-    status = "PASS" if got == exp else "FAIL"
-    print(f"ID={ident} expected={exp} got={got} => {status}")
+# after proc.wait()
+print("\n===== IPv6 Fragmentation Reassembly Report =====")
+for name, frag_id_str, expect_ok in tests_def:
+    # look for reassembly success marker
+    reassembled = any(frag_id_str in l and "IPv6 reassembled" in l for l in lines)
+    flushed     = any(frag_id_str in l and "Flushing incomplete" in l for l in lines)
+    ok = (expect_ok and reassembled and not flushed) or (not expect_ok and flushed and not reassembled)
+    status = "PASS" if ok else "FAIL"
+    print(f"{name:12s}: expected={'OK' if expect_ok else 'FAIL'} got={'OK' if reassembled else 'FAIL'} → {status}")

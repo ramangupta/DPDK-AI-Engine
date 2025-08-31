@@ -44,6 +44,9 @@ typedef struct {
     struct in_addr host_v4[MAX_HOST_ADDRS];
     struct in6_addr host_v6[MAX_HOST_ADDRS];
 
+    bool read_pcap;
+    char read_file[256];
+    
     bool write_pcap;
     char write_file[256];
 

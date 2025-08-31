@@ -12,7 +12,7 @@
 
 // Toggle debug output
 #ifndef IPV6_FRAG_DEBUG
-#define IPV6_FRAG_DEBUG 1
+#define IPV6_FRAG_DEBUG 0
 #endif
 
 typedef struct {
@@ -43,16 +43,33 @@ static frag_ctx6_t table[MAX_FRAG_CTX];
 static frag_ctx6_t* find_ctx6(const struct in6_addr *src, const struct in6_addr *dst,
                              uint32_t id, uint8_t proto)
 {
+    char src_str[INET6_ADDRSTRLEN];
+    char dst_str[INET6_ADDRSTRLEN];
+
     for (int i=0;i<MAX_FRAG_CTX;i++) {
         frag_ctx6_t *c = &table[i];
+
+        // Convert addresses to printable form
+        inet_ntop(AF_INET6, &c->src, src_str, sizeof(src_str));
+        inet_ntop(AF_INET6, &c->dst, dst_str, sizeof(dst_str));
+
+
         if (c->in_use &&
             !memcmp(&c->src, src, sizeof(*src)) &&
             !memcmp(&c->dst, dst, sizeof(*dst)) &&
             c->id==id && c->proto==proto)
         {
+#if IPV6_FRAG_DEBUG
+        printf("[DEBUG] Match Found ctx[%d]: in_use=%d src=%s dst=%s id=%u proto=%u\n",
+               i, c->in_use, src_str, dst_str, c->id, c->proto);
+#endif            
             return c;
         }
     }
+#if IPV6_FRAG_DEBUG
+    printf("[DEBUG] no matching fragment context found\n");
+#endif
+
     return NULL;
 }
 
@@ -86,15 +103,30 @@ static frag_ctx6_t* alloc_ctx6(const struct in6_addr *src, const struct in6_addr
 
 static int ensure_payload_cap(frag_ctx6_t *c, uint32_t cap)
 {
-    if (c->payload_cap >= cap) return 1;
+    if (c->payload_cap >= cap) {
+        return 1;
+    }
+
+
     uint32_t newcap = c->payload_cap ? c->payload_cap : 2048;
-    while (newcap < cap) newcap *= 2;
+
+    while (newcap < cap) 
+        newcap *= 2;
+
     uint8_t *np = realloc(c->payload, newcap);
-    if (!np) return 0;
+    if (!np) 
+        return 0;
+    
     if (newcap > c->payload_cap)
         memset(np + c->payload_cap, 0, newcap - c->payload_cap);
+
     c->payload = np;
     c->payload_cap = newcap;
+
+#if IPV6_FRAG_DEBUG
+        printf("[DEBUG] Ensure payload new capacity %d in ctx and inp cap %d\n", 
+            c->payload_cap, cap);
+#endif
     return 1;
 }
 
@@ -158,8 +190,6 @@ static int intervals_cover_full(frag_ctx6_t *c, uint32_t total)
 // ---------------- API ----------------
 pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr, 
                           const pkt_view *pv,
-                          uint32_t frag_offset,
-                          int mf,
                           uint64_t now)
 {
     if (!pv || !frag_hdr) return NULL;
@@ -170,15 +200,14 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
     uint32_t frag_id = rte_be_to_cpu_32(fh->identification);
     uint16_t raw_off = rte_be_to_cpu_16(fh->fragment_offset); // fragment_offset field in header
     uint32_t off = (raw_off & 0xFFF8);           // offset in bytes
-    off *= 8;
-    int more_frags = (raw_off & 0x1) != 0;
+    int more_frags = (raw_off & 0x1);
 
     uint32_t copy_len = pv->len - sizeof(*ip6) - sizeof(*fh);
     uint32_t end = off + copy_len;
 
 #if IPV6_FRAG_DEBUG
-    printf("[DEBUG] IPv6 frag: id=%u, offset=%u, len=%u, mf=%d\n",
-           frag_id, off, copy_len, more_frags);
+    printf("[DEBUG] IPv6 frag: id=%x, offset=%u, len=%u, mf=%d, end=%d\n",
+           frag_id, off, copy_len, more_frags, end);
 #endif
 
     frag_ctx6_t *c = find_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr, frag_id, ip6->proto);
@@ -210,7 +239,9 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
 
     if (!more_frags) {
         c->saw_last = 1;
-        if (c->total_len < end) c->total_len = end;  // track largest end
+        if (c->total_len < end) 
+            c->total_len = end;  // track largest end
+
 #if IPV6_FRAG_DEBUG
         printf("[DEBUG] Saw last fragment for id=%u, total_len=%u\n", frag_id, c->total_len);
 #endif

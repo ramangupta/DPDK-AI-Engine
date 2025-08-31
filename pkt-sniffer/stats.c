@@ -4,6 +4,8 @@
 #include "stats.h"
 #include "talkers.h"
 #include <string.h>
+#include <arpa/inet.h>   // for inet_ntop
+
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
@@ -72,12 +74,57 @@ void stats_record_arp(const char *ip, const char *mac) {
 }
 
 
-void stats_record_frag(uint32_t src, uint32_t dst, uint16_t id) {
+void stats_record_frag(uint32_t src, uint32_t dst, uint16_t id, int complete) {
+    // Search for existing entry
+    for (int i = 0; i < frag_count; i++) {
+        if (frag_table[i].version == IPV4 &&
+            frag_table[i].id == id &&
+            frag_table[i].srcip == src &&
+            frag_table[i].dstip == dst) {
+
+            frag_table[i].count++;
+            if (complete)
+                frag_table[i].done = 1;
+            return;
+        }
+    }
+
+    // New entry
     if (frag_count < MAX_FRAG) {
+        frag_table[frag_count].version = IPV4;
         frag_table[frag_count].srcip = src;
         frag_table[frag_count].dstip = dst;
         frag_table[frag_count].id = id;
-        frag_table[frag_count].count++;
+        frag_table[frag_count].count = 1;
+        frag_table[frag_count].done = complete;
+        frag_count++;
+    }
+}
+
+
+void stats_record_ipv6_frag(const uint8_t *src6, const uint8_t *dst6,
+                            uint32_t id, uint16_t frag_off,
+                            int more_frags, uint64_t now,
+                            int complete)
+{
+    for (int i = 0; i < frag_count; i++) {
+        if (frag_table[i].version == IPV6 &&
+            frag_table[i].id == id) {
+            frag_table[i].count++;
+            if (complete)
+                frag_table[i].done = 1;
+            return;
+        }
+    }
+
+    // new entry
+    if (frag_count < MAX_FRAG) {
+        frag_table[frag_count].version = IPV6;
+        frag_table[frag_count].id = id;
+        memcpy(frag_table[frag_count].src6, src6, 16);
+        memcpy(frag_table[frag_count].dst6, dst6, 16);
+        frag_table[frag_count].count = 1;
+        frag_table[frag_count].done = complete;
         frag_count++;
     }
 }
@@ -278,11 +325,48 @@ void stats_report(void) {
     }
 
     printf("\n=== IPv4 Fragments ===\n");
-    for (int i=0; i<frag_count; i++) {
-        printf("src=%u dst=%u id=%u count=%u\n",
-            frag_table[i].srcip, frag_table[i].dstip,
-            frag_table[i].id, frag_table[i].count);
+    printf("%-18s %-18s %-20s %-7s %-12s\n",
+        "Source", "Destination", "ID (dec/hex)", "Count", "Status");
+
+    for (int i = 0; i < frag_count; i++) {
+        if (frag_table[i].version == IPV4) {
+            char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
+            char idbuf[32];
+            snprintf(idbuf, sizeof(idbuf), "%u/0x%04x", frag_table[i].id, frag_table[i].id);
+
+            inet_ntop(AF_INET, &frag_table[i].srcip, src, sizeof(src));
+            inet_ntop(AF_INET, &frag_table[i].dstip, dst, sizeof(dst));
+
+            printf("%-18s %-18s %-20s %-8u %-12s\n",
+                    src, dst, idbuf,
+                    frag_table[i].count,
+                    frag_table[i].done ? "DONE" : "IN-PROGRESS");
+
+        }
     }
+
+
+
+    printf("\n=== IPv6 Fragments ===\n");
+    printf("%-39s %-39s %-25s %-10s %-12s\n",
+        "Source", "Destination", "ID (dec/hex)", "Count", "Status");
+
+    for (int i = 0; i < frag_count; i++) {
+        if (frag_table[i].version == IPV6) {
+            char src[40], dst[40];
+            inet_ntop(AF_INET6, frag_table[i].src6, src, sizeof(src));
+            inet_ntop(AF_INET6, frag_table[i].dst6, dst, sizeof(dst));
+
+            printf("%-39s %-39s %10u (0x%08x) %-10u %-12s\n",
+                src, dst,
+                frag_table[i].id,
+                frag_table[i].id,
+                frag_table[i].count,
+                frag_table[i].done ? "DONE" : "IN-PROGRESS");
+        }
+    }
+
+
 
     stats_http_print();
 
@@ -294,7 +378,7 @@ void stats_report(void) {
             tls_table[i].alpn, tls_table[i].cipher);
     }
 
-    printf("Cumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);
+    printf("\nCumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);
 
     // Reset interval counters
     dhcp_count = dns_count = arp_count = frag_count = 0;

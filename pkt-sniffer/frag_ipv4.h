@@ -26,8 +26,6 @@ void frag_ipv4_flush_all(void);
 // IPv6
 pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr, 
                           const pkt_view *pv,
-                          uint32_t frag_offset,
-                          int mf,
                           uint64_t now);
 
 void frag_ipv6_flush_all(void);
