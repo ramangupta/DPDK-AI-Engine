@@ -31,6 +31,24 @@ static int dns_count = 0;
 static http_session_t http_sessions[MAX_HTTP_SESSIONS];
 static int http_session_count = 0;
 
+proto_stats_t proto_stats[MAX_PROTO] = {0};
+
+const char *proto_name(enum proto_type p) {
+    switch (p) {
+    case PROTO_IPV4: return "IPv4";
+    case PROTO_IPV6: return "IPv6";
+    case PROTO_TCP: return "TCP";
+    case PROTO_UDP: return "UDP";
+    case PROTO_ICMP: return "ICMP";
+    case PROTO_DNS: return "DNS";
+    case PROTO_ARP: return "ARP";
+    case PROTO_TLS_HANDSHAKE: return "TLS-HS";
+    case PROTO_TLS_APPDATA: return "TLS-App";
+    case PROTO_HTTP: return "HTTP";
+    default: return "OTHER";
+    }
+}
+
 void stats_update(enum proto_type p, uint16_t pktlen) {
     switch (p) {
     case PROTO_IPV4: global_stats.ipv4++; break;
@@ -48,6 +66,14 @@ void stats_update(enum proto_type p, uint16_t pktlen) {
 
     total_pkts++;
     total_bytes += pktlen;
+
+    if (p >= MAX_PROTO) return;
+
+    proto_stats[p].pkts_total++;
+    proto_stats[p].bytes_total += pktlen;
+    proto_stats[p].pkts_interval++;
+    proto_stats[p].bytes_interval += pktlen;
+
 }
 
 void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip) {
@@ -280,6 +306,28 @@ void stats_poll(void) {
     }
 }
 
+static void format_bytes(uint64_t bytes, char *buf, size_t buflen) {
+    if (bytes > (1024ULL * 1024 * 1024))
+        snprintf(buf, buflen, "%.2f GB", bytes / (1024.0 * 1024 * 1024));
+    else if (bytes > (1024ULL * 1024))
+        snprintf(buf, buflen, "%.2f MB", bytes / (1024.0 * 1024));
+    else if (bytes > 1024ULL)
+        snprintf(buf, buflen, "%.2f KB", bytes / 1024.0);
+    else
+        snprintf(buf, buflen, "%lu B", bytes);
+}
+
+static void format_bandwidth(double bps, char *buf, size_t buflen) {
+    if (bps > 1e9)
+        snprintf(buf, buflen, "%.2f Gbps", bps / 1e9);
+    else if (bps > 1e6)
+        snprintf(buf, buflen, "%.2f Mbps", bps / 1e6);
+    else if (bps > 1e3)
+        snprintf(buf, buflen, "%.2f Kbps", bps / 1e3);
+    else
+        snprintf(buf, buflen, "%.0f bps", bps);
+}
+
 void stats_report(void) {
     uint64_t pkt_sum = global_stats.ipv4 + global_stats.ipv6 +
                        global_stats.tcp + global_stats.udp +
@@ -318,7 +366,6 @@ void stats_report(void) {
         }
     }
 
-
     printf("\n=== ARP Seen ===\n");
     for (int i=0; i<arp_count; i++) {
         printf("%s is-at %s\n", arp_table[i].ip, arp_table[i].mac);
@@ -345,8 +392,6 @@ void stats_report(void) {
         }
     }
 
-
-
     printf("\n=== IPv6 Fragments ===\n");
     printf("%-39s %-39s %-25s %-10s %-12s\n",
         "Source", "Destination", "ID (dec/hex)", "Count", "Status");
@@ -366,8 +411,6 @@ void stats_report(void) {
         }
     }
 
-
-
     stats_http_print();
 
     printf("\n=== TLS Sessions ===\n");
@@ -376,6 +419,31 @@ void stats_report(void) {
             tls_table[i].src, tls_table[i].dst,
             tls_table[i].sni, tls_table[i].version,
             tls_table[i].alpn, tls_table[i].cipher);
+    }
+
+    printf("\n=== Per Protocol Stats (%d sec) ===\n", REPORT_INTERVAL);
+    printf("%-15s %-10s %-12s %-12s\n",
+           "Protocol", "Pkts", "Bytes", "Bandwidth");
+
+    for (int p = 0; p < MAX_PROTO; p++) {
+        if (proto_stats[p].pkts_interval == 0 &&
+            proto_stats[p].bytes_interval == 0)
+            continue;
+
+        char bwbuf[32], bytebuf[32];
+
+        double bps = (proto_stats[p].bytes_interval * 8.0) / REPORT_INTERVAL;
+        format_bandwidth(bps, bwbuf, sizeof(bwbuf));
+        format_bytes(proto_stats[p].bytes_interval, bytebuf, sizeof(bytebuf));
+        printf("%-15s %-10lu %-12s %-12s\n",
+               proto_name(p),
+               proto_stats[p].pkts_interval,
+               bytebuf,
+               bwbuf);
+
+        // reset interval counters
+        proto_stats[p].pkts_interval = 0;
+        proto_stats[p].bytes_interval = 0;
     }
 
     printf("\nCumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);

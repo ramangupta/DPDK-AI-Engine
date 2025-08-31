@@ -32,8 +32,19 @@ enum proto_type {
     PROTO_ARP,
     PROTO_TLS_HANDSHAKE,
     PROTO_TLS_APPDATA,
-    PROTO_HTTP
+    PROTO_HTTP,
+    MAX_PROTO
 };
+
+/* Per protocol Bandwidth */
+typedef struct {
+    uint64_t pkts_total;
+    uint64_t bytes_total;
+    uint64_t pkts_interval;
+    uint64_t bytes_interval;
+} proto_stats_t;
+
+extern proto_stats_t proto_stats[MAX_PROTO];
 
 // Define stats structure
 struct stats {
