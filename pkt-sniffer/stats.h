@@ -58,6 +58,11 @@ struct stats {
     uint64_t tls_handshake;
     uint64_t tls_appdata;
     uint64_t http;
+    uint64_t tcp_segments;
+    uint64_t tcp_bytes;
+    uint64_t tcp_duplicates;
+    uint64_t tcp_overlaps;
+    uint64_t tcp_out_of_order;
 };
 
 // DHCP transaction
@@ -148,5 +153,10 @@ void stats_record_ipv6_frag(const uint8_t *src6, const uint8_t *dst6,
                             uint32_t id, uint16_t frag_off,
                             int more_frags, uint64_t now,
                             int complete);
+
+void stats_tcp_segment(uint16_t pktlen);
+void stats_tcp_duplicate(void);
+void stats_tcp_overlap(void);
+void stats_tcp_out_of_order(void);
 
 #endif

@@ -163,7 +163,6 @@ void flow_expire(uint64_t now_ns) {
     for (int i = 0; i < flow_count; i++) {
         if (flow_table[i].in_use &&
             (now_ns - flow_table[i].last_seen) > FLOW_TIMEOUT_NS) {
-            printf("RAMAN : Time up flow %d in flow table\n", i);
             flow_table[i].in_use = 0;  // mark expired
         }
     }

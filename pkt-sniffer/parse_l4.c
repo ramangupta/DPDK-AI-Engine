@@ -16,6 +16,16 @@
 #include "tcp_reass.h"
 #include "flows.h"
 
+#ifndef L4_DEBUG
+#define L4_DEBUG    1
+#endif
+
+#if L4_DEBUG
+#define DEBUG_PRINT(fmt, ...) \
+    fprintf(stderr, "[L4_PARSE][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define DEBUG_PRINT(fmt, ...) do {} while (0)
+#endif
 
 static const char* icmpv4_type_name(uint8_t t) {
     switch (t) {
@@ -152,30 +162,49 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
                                  const uint8_t *data, uint32_t len,
                                  time_t ts, void *user_ctx)
 {
-    // build an app-level pkt_view and call HTTP/TLS parsers
+#if L4_DEBUG
+    DEBUG_PRINT("TCP flow %s:%u -> %s:%u | dir=%d | ts=%ld | len=%u\n",
+            tcp_flow_src_ip(flow), tcp_flow_src_port(flow),
+            tcp_flow_dst_ip(flow), tcp_flow_dst_port(flow),
+            dir, ts, len);
+
+    if (len > 0) {
+        DEBUG_PRINT("  First bytes: ");
+        for (uint32_t i = 0; i < (len < 16 ? len : 16); i++) {
+            DEBUG_PRINT("%02x ", data[i]);
+        }
+        DEBUG_PRINT("\n");
+    }
+#endif
+
+    // Wrap in pkt_view so application parsers can use it
     pkt_view app_pv = {0};
     app_pv.data = (uint8_t*)data;
-    app_pv.len = len;
+    app_pv.len  = len;
 
-    // set ports and copy ip strings from flow
-    // tcp_reass stores strings; we need them — cast flow to known struct
-    // but tcp_flow_t is opaque in header; we can rely on flow->src_ip etc here because it's same compile unit
-    // safer: modify tcp_reass.h to expose minimal getters; for now assume the struct fields exist.
-    // If you prefer, copy ip/ports as user_ctx when invoking tcp_reass_process_segment.
+    // Future: set src/dst ports + IP strings for richer logging
+    // e.g., snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", flow->src_ip);
 
-    // For simplicity: call HTTP/TLS based on ports — attempt both directions (port 80/443)
-    // We'll not set src/dst printable fields here; parse_http/parse_tls only need app_pv.data/len in many cases.
-    // Decide parser by checking if data looks like HTTP (starts with alphachar) or TLS (0x16 handshake)
     if (len > 0) {
+        // Heuristic: TLS starts with 0x16 handshake
         if (data[0] == 0x16 && len >= 5) {
-            // TLS record likely
+
+            DEBUG_PRINT("  → Delivering to TLS parser\n");
             parse_tls(&app_pv);
+
         } else {
-            // crude HTTP detection: methods are letters (GET/POST/PUT/HEAD/OPTIONS)
-            if ((data[0] >= 'A' && data[0] <= 'Z') || memcmp(data, "HTTP/", 5) == 0) {
+            // Crude HTTP detection: starts with alpha or "HTTP/"
+            if ((data[0] >= 'A' && data[0] <= 'Z') ||
+                (len >= 5 && memcmp(data, "HTTP/", 5) == 0))
+            {
+
+                DEBUG_PRINT("  → Delivering to HTTP parser\n");
+
                 parse_http(&app_pv);
             } else {
-                // otherwise, no-op or future app parsers
+
+                DEBUG_PRINT("  → Unrecognized L7 payload (not HTTP/TLS)\n");
+                // future app parsers go here
             }
         }
     }
@@ -216,7 +245,7 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
         if ((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) {
             pkt_view dhcpview = {
                 .data = (uint8_t *)uh + sizeof(*uh),
-                .len  = udplen,
+                .len  = paylen,
                 .src_port = sport,
                 .dst_port = dport,
             };

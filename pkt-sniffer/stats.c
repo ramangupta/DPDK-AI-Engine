@@ -33,6 +33,26 @@ static int http_session_count = 0;
 
 proto_stats_t proto_stats[MAX_PROTO] = {0};
 
+// ------------------- TCP Reassembly Stats -------------------
+void stats_tcp_segment(uint16_t pktlen) {
+    global_stats.tcp_segments++;
+    global_stats.tcp_bytes += pktlen;
+    stats_update(PROTO_TCP, pktlen);
+}
+
+void stats_tcp_duplicate(void) {
+    global_stats.tcp_duplicates++;
+}
+
+void stats_tcp_overlap(void) {
+    global_stats.tcp_overlaps++;
+}
+
+void stats_tcp_out_of_order(void) {
+    global_stats.tcp_out_of_order++;
+}
+// -------------------------------------------------------------
+
 const char *proto_name(enum proto_type p) {
     switch (p) {
     case PROTO_IPV4: return "IPv4";
@@ -319,12 +339,10 @@ void stats_poll(uint64_t now_tsc) {
     }
 
     if (now_sec - last_maint >= 1) {
-        // Expire old flows (pass nanoseconds!)
-        flow_expire(now_ns);
-
         // TCP reassembly maintenance can stay on seconds
         tcp_reass_periodic_maintenance(now_sec);
-
+        // Expire old flows (pass nanoseconds!)
+        flow_expire(now_ns);
         last_maint = now_sec;
     }
 }
@@ -423,6 +441,14 @@ void stats_report(void) {
         }
     }
 
+    // ------------------- TCP Reassembly Stats -------------------
+    printf("\n=== TCP Reassembly Stats ===\n");
+    printf("Segments received    : %lu\n", global_stats.tcp_segments);
+    printf("Bytes delivered      : %lu\n", global_stats.tcp_bytes);
+    printf("Duplicate segments   : %lu\n", global_stats.tcp_duplicates);
+    printf("Overlapping segments : %lu\n", global_stats.tcp_overlaps);
+    printf("Out-of-order segments: %lu\n", global_stats.tcp_out_of_order);
+
     stats_http_print();
 
     printf("\n=== TLS Sessions ===\n");
@@ -470,6 +496,9 @@ void stats_report(void) {
     global_stats.arp = 0;
     global_stats.tls_handshake = global_stats.tls_appdata = 0;
     global_stats.http = 0;
+    global_stats.tcp_segments = global_stats.tcp_bytes = 0;
+    global_stats.tcp_duplicates = global_stats.tcp_overlaps = 0;
+    global_stats.tcp_out_of_order = 0;
     tls_count = 0;  
     total_bytes = 0;
 
