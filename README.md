@@ -35,7 +35,28 @@ Think of it as **tcpdump on steroids** — flow-aware, protocol-smart, and ready
 
 ## 🏗️ Architecture Overview
 
-Data Sources → DPDK Packet Capture → TCP/IP Reassembly → Feature Extraction → AI Prediction → Dashboard/Storage
+                ┌──────────────┐
+                │   NIC / DPDK │
+                └───────┬──────┘
+                        │ packets (10G/40G/100G)
+                ┌───────▼─────────┐
+                │  Packet Capture │   (DPDK / AF_PACKET / PCAP)
+                └───────┬─────────┘
+                        │
+                ┌───────▼─────────┐
+                │  Parser & Stats │   (L2/L3/L4 decoders, flow tracking,
+                │                 │    TCP reassembly, drops/errors)
+                └───────┬─────────┘
+                        │
+        ┌───────────────▼───────────────┐
+        │   Analytics & AI Integration   │  (anomaly detection, ML features,
+        │                                │   predictive models)
+        └───────────────┬───────────────┘
+                        │
+                ┌───────▼─────────┐
+                │  Output / UI    │   (console, JSON, Grafana, custom UI)
+                └─────────────────┘
+
 
   - Data Sources: Market feeds, sensors, APIs, etc.
   - DPDK Packet Capture: Ultra-fast, zero-copy packet ingestion.
@@ -68,12 +89,31 @@ See full roadmap here: [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## 🏁 Quick Start
 
+Prerequisites
 
-# Development mode (PCAP / AF_PACKET)
-./build/pkt-sniffer --no-pci -vdev=net_af_packet0,iface=wlo1
+Dependencies:
+Make sure the following libraries are installed on your system:
 
-# DPDK production mode
-sudo ./build/pkt-sniffer -l 0-3 -n 4 --vdev=...
+        - Meson
+        - Ninja
+        - libpcap
+        - DPDK (if using DPDK environment)
+        - Standard build tools (gcc/clang, pkg-config, make)
+
+sudo apt update
+sudo apt install -y meson ninja-build build-essential pkg-config \
+    libpcap-dev
+
+For DPDK (optional, for high-speed packet capture):
+sudo apt install -y dpdk dpdk-dev
+
+Build
+
+# Configure
+meson setup build
+
+# Compile
+ninja -C build
 
 ---
 
