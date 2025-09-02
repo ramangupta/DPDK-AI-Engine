@@ -1,8 +1,8 @@
-📡 DPDK-Stock-AI — Vision
+📡 DPDK-AI-ENGINE — Vision
 
 🌍 What We’re Building
 
-DPDK-Stock-AI is not “just another packet sniffer.”
+DPDK-ENGINE-AI is not “just another packet sniffer.”
 It is a next-generation, ultra-low-latency analytics engine designed for financial markets and AI-driven decision-making.
 
 ![Project Roadmap](./dpdk_stock_ai_roadmap.png)

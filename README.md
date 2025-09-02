@@ -1,6 +1,6 @@
-# 🚀 ⚡ dpdk-pkt-ai: Ultra-Low Latency Packet Analytics with DPDK & AI 🚀
+# 🚀 ⚡ DPDK AI ENGINE: Ultra-Low Latency Packet Analytics with DPDK & AI 🚀
 
-`dpdk-pkt-ai` is a **blazing-fast packet analytics framework** designed for environments where **microseconds matter**.  
+`DPDK-AI-Engine` is a **blazing-fast packet analytics framework** designed for environments where **microseconds matter**.  
 It combines **DPDK’s zero-copy packet capture** with an **AI-ready analytics engine**, enabling deep insights into live traffic at **line rate**.
 
 Think of it as **tcpdump on steroids** — flow-aware, protocol-smart, and ready for machine learning.
@@ -109,10 +109,10 @@ sudo apt install -y dpdk dpdk-dev
 
 Build
 
-# Configure
+### Configure
 meson setup build
 
-# Compile
+### Compile
 ninja -C build
 
 ---
@@ -131,12 +131,12 @@ Bytes delivered      : 5378
 Duplicate segments   : 9
 Out-of-order segments: 0
 
-🤝 Contributing
+## 🤝 Contributing
 
 Pull requests are welcome! Check the TODO.md for active stories & open features.
 We’re building this as a modular, community-driven project for next-gen packet analytics.
 
-📜 License
+## 📜 License
 
 Apache 2.0 – free to use, modify, and extend.
 
