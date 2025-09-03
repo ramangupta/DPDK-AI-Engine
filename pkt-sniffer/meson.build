@@ -27,6 +27,7 @@ sources = [
   'sniffer_signal.c',
   'tcp_reass.c',
   'flows.c',
+  'parse_tunnel.c',
 ]
 
 deps = []

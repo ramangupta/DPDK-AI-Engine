@@ -50,9 +50,16 @@ pkt_view *capture_from_mbuf(struct rte_mbuf *mbuf) {
 }
 #endif
 
-// free correctly
+// free correctly (recursive)
 void capture_free(pkt_view *pv) {
     if (!pv) return;
+
+    // free any inner packet first
+    if (pv->inner_pkt) {
+        capture_free(pv->inner_pkt);
+        pv->inner_pkt = NULL;
+    }
+
     switch (pv->kind) {
         case PV_KIND_HEAP:
             free(pv->backing);
@@ -68,3 +75,4 @@ void capture_free(pkt_view *pv) {
     }
     free(pv);
 }
+

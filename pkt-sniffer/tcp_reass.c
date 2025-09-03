@@ -8,6 +8,7 @@
 #include "capture.h"
 #include "parse_http.h"
 #include "parse_tls.h"
+#include "stats.h"
 
 // Debug toggle
 #ifndef TCP_DEBUG

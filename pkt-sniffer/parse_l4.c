@@ -210,7 +210,7 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
     }
 }
 
-void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
+void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 {
     flow_key_t fkey;
 
@@ -239,7 +239,7 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice)
 
         if (paylen > 0 && (sport == 53 || dport == 53)) {
             stats_update(PROTO_DNS, pv_slice->len);
-            parse_dns_udp(udp_payload, paylen, /*is_response=*/(sport == 53));
+            parse_dns_udp(udp_payload, paylen, /*is_response=*/(sport == 53), now);
         }
         
         if ((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) {

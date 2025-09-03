@@ -8,6 +8,8 @@
 #include "tcp_reass.h"
 #include "flows.h"
 #include "utils.h"
+#include "parse_dns.h"
+#include <math.h>
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
@@ -25,13 +27,14 @@ static int frag_count = 0;
 static struct tls_stat tls_table[MAX_TLS];
 static int tls_count = 0;
 
-static struct dns_entry dns_table[DNS_MAX_ENTRIES];
+dns_entry_t dns_table[DNS_MAX_ENTRIES];
 static int dns_count = 0;
 
 static http_session_t http_sessions[MAX_HTTP_SESSIONS];
 static int http_session_count = 0;
 
 proto_stats_t proto_stats[MAX_PROTO] = {0};
+static tunnel_stats_t tunnel_stats = {0};
 
 // ------------------- TCP Reassembly Stats -------------------
 void stats_tcp_segment(uint16_t pktlen) {
@@ -95,6 +98,21 @@ void stats_update(enum proto_type p, uint16_t pktlen) {
     proto_stats[p].bytes_interval += pktlen;
 
 }
+
+void dns_expire(uint64_t now_ns) {
+    const uint64_t TIMEOUT = 30ULL * 1000000000ULL; // 30s
+    for (int i = 0; i < dns_count; i++) {
+        uint64_t last = (dns_table[i].ts_resp ? dns_table[i].ts_resp
+                                              : dns_table[i].ts_query);
+        if (now_ns - last > TIMEOUT) {
+            // Remove by shifting down
+            dns_table[i] = dns_table[dns_count - 1];
+            dns_count--;
+            i--; // re-check this index
+        }
+    }
+}
+
 
 void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip) {
     if (dhcp_count < MAX_DHCP) {
@@ -175,64 +193,91 @@ void stats_record_ipv6_frag(const uint8_t *src6, const uint8_t *dst6,
     }
 }
 
-void stats_record_dns_query(uint16_t id, const char *qname) {
+void stats_record_dns_query(uint16_t id, const char *qname, uint64_t now, int pktlen) {
     if (!qname || !*qname) return;
-    if (dns_count >= DNS_MAX_ENTRIES) return;
 
-    // Create new entry
-    dns_table[dns_count].id = id;
-    snprintf(dns_table[dns_count].qname,
-             sizeof dns_table[dns_count].qname,
-             "%s", qname);
-    dns_table[dns_count].nanswers = 0;
+    // Look for an existing entry
+    for (int i = 0; i < dns_count; i++) {
+        dns_entry_t *e = &dns_table[i];
+        if (e->id == id && strcmp(e->qname, qname) == 0) {
+            // Refresh timestamp if query seen again
+            e->ts_query = now;
+            e->q_pkts++;
+            e->q_bytes += pktlen;
+            return;
+        }
+    }
 
-    // Put placeholder answer
-    snprintf(dns_table[dns_count].answers[0],
-             sizeof dns_table[dns_count].answers[0],
-             "-");
-    dns_table[dns_count].nanswers = 1;
+    // New entry if space
+    if (dns_count < DNS_MAX_ENTRIES) {
+        dns_entry_t *e = &dns_table[dns_count++];
+        memset(e, 0, sizeof(*e));
+        e->id = id;
+        snprintf(e->qname, sizeof e->qname, "%s", qname);
+        e->nanswers = 0;
+        e->rcode = -1;
+        e->ts_query = now;
+        e->ts_resp  = 0;
+        e->q_pkts   = 1;
+        e->q_bytes  = pktlen;
+        e->r_pkts   = 0;
+        e->r_bytes  = 0;
 
-    dns_count++;
+        // placeholder answer
+        snprintf(e->answers[0], sizeof e->answers[0], "-");
+        e->nanswers = 1;
+    }
 }
 
-
-void stats_record_dns_answer(uint16_t id, const char *qname, const char *ans) {
+void stats_record_dns_answer(uint16_t id, const char *qname, const char *ans,
+                             int rcode, uint64_t now_ns, int pktlen) {
     if (!qname || !ans) return;
 
     // Find matching entry by ID + qname
     for (int i = 0; i < dns_count; i++) {
-        if (dns_table[i].id == id &&
-            strcmp(dns_table[i].qname, qname) == 0) {
+        dns_entry_t *e = &dns_table[i];
+        if (e->id == id && strcmp(e->qname, qname) == 0) {
+            // First response seen
+            if (e->ts_resp == 0) {
+                e->ts_resp = now_ns;
+                e->rcode   = rcode;
+            }
+
+            e->r_pkts++;
+            e->r_bytes += pktlen;
+
             // Dedup check
-            for (int j = 0; j < dns_table[i].nanswers; j++) {
-                if (strcmp(dns_table[i].answers[j], ans) == 0)
+            for (int j = 0; j < e->nanswers; j++) {
+                if (strcmp(e->answers[j], ans) == 0)
                     return;
             }
 
             // Append answer if space
-            if (dns_table[i].nanswers < DNS_MAX_ANS) {
-                int n = dns_table[i].nanswers++;
-                snprintf(dns_table[i].answers[n],
-                         sizeof dns_table[i].answers[n],
+            if (e->nanswers < DNS_MAX_ANS) {
+                snprintf(e->answers[e->nanswers++],
+                         sizeof e->answers[0],
                          "%s", ans);
             }
             return;
         }
     }
 
-    // If no query entry, create one with this answer
+    // If no query entry, create one with this answer (late-arrival response)
     if (dns_count < DNS_MAX_ENTRIES) {
-        dns_table[dns_count].id = id;
-        snprintf(dns_table[dns_count].qname,
-                 sizeof dns_table[dns_count].qname,
-                 "%s", qname);
-        snprintf(dns_table[dns_count].answers[0],
-                 sizeof dns_table[dns_count].answers[0],
-                 "%s", ans);
-        dns_table[dns_count].nanswers = 1;
-        dns_count++;
+        dns_entry_t *e = &dns_table[dns_count++];
+        memset(e, 0, sizeof(*e));
+        e->id = id;
+        snprintf(e->qname, sizeof e->qname, "%s", qname);
+        snprintf(e->answers[0], sizeof e->answers[0], "%s", ans);
+        e->nanswers = 1;
+        e->rcode    = rcode;
+        e->ts_resp  = now_ns;   // no query seen, but response time set
+        e->r_pkts   = 1;
+        e->r_bytes  = pktlen;
     }
 }
+
+
 
 void stats_record_tls(const char *src, const char *dst,
                       const char *sni, const char *alpn,
@@ -286,6 +331,28 @@ void stats_http_update(const char *src, const char *dst,
     }
 }
 
+void stats_tunnel_update(pkt_view *pv) {
+    if (!pv || !pv->is_tunnel) return;
+
+    size_t pktlen = pv->inner_pkt ? pv->inner_pkt->len : pv->len;
+
+    switch (pv->tunnel.type) {
+        case TUNNEL_GRE:
+            tunnel_stats.gre_pkts++;
+            tunnel_stats.gre_bytes += pktlen;
+            break;
+        case TUNNEL_VXLAN:
+            tunnel_stats.vxlan_pkts++;
+            tunnel_stats.vxlan_bytes += pktlen;
+            break;
+        case TUNNEL_GENEVE:
+            tunnel_stats.geneve_pkts++;
+            tunnel_stats.geneve_bytes += pktlen;
+            break;
+        default:
+            break;
+    }
+}
 
 void stats_http_print(void)
 {
@@ -343,6 +410,7 @@ void stats_poll(uint64_t now_tsc) {
         tcp_reass_periodic_maintenance(now_sec);
         // Expire old flows (pass nanoseconds!)
         flow_expire(now_ns);
+        dns_expire(now_ns);
         last_maint = now_sec;
     }
 }
@@ -356,6 +424,49 @@ static void format_bytes(uint64_t bytes, char *buf, size_t buflen) {
         snprintf(buf, buflen, "%.2f KB", bytes / 1024.0);
     else
         snprintf(buf, buflen, "%lu B", bytes);
+}
+
+void stats_report_dns(void) 
+{
+    printf("\n=== DNS Transactions ===\n");
+    for (int i = 0; i < dns_count; i++) {
+        dns_entry_t *e = &dns_table[i];
+
+        const char *rcode_strv = (e->rcode == -1) ? "PENDING" : rcode_str(e->rcode);
+
+        double latency_ms = NAN;
+        if (e->ts_query && e->ts_resp)
+            latency_ms = (e->ts_resp - e->ts_query) / 1e6;
+
+        printf("ID=0x%04x Q=%s RCODE=%s Latency=%s",
+            e->id, e->qname, rcode_strv,
+            isnan(latency_ms) ? "N/A" : 
+                ({ static char buf[32]; snprintf(buf, sizeof(buf), "%.2f ms", latency_ms); buf; }));
+
+        printf(" pkts=%d/%d bytes=%d/%d\n",
+            e->q_pkts, e->r_pkts,
+            e->q_bytes, e->r_bytes);
+
+        for (int j = 0; j < e->nanswers; j++) {
+            printf("   A=%s\n", e->answers[j]);
+        }
+    }
+}
+
+
+void stats_tunnel_report(void) {
+    printf("\n=== Tunnel Stats ===\n");
+    printf("%-10s %-10s %-12s\n", "Tunnel", "Pkts", "Bytes");
+    char buf[32];
+
+#define PRINT_TUNNEL(name, pkts, bytes) \
+        format_bytes(bytes, buf, sizeof(buf)); \
+        printf("%-10s %-10lu %-12s\n", name, pkts, buf);
+
+    PRINT_TUNNEL("GRE", tunnel_stats.gre_pkts, tunnel_stats.gre_bytes);
+    PRINT_TUNNEL("VXLAN", tunnel_stats.vxlan_pkts, tunnel_stats.vxlan_bytes);
+    PRINT_TUNNEL("GENEVE", tunnel_stats.geneve_pkts, tunnel_stats.geneve_bytes);
+
 }
 
 void stats_report(void) {
@@ -386,15 +497,7 @@ void stats_report(void) {
             dhcp_table[i].yiaddr);
     }
 
-    printf("\n=== DNS Transactions ===\n");
-    for (int i = 0; i < dns_count; i++) {
-        for (int j = 0; j < dns_table[i].nanswers; j++) {
-            printf("ID=0x%04x Q=%s A=%s\n",
-                dns_table[i].id,
-                dns_table[i].qname,
-                dns_table[i].answers[j]);
-        }
-    }
+    stats_report_dns();
 
     printf("\n=== ARP Seen ===\n");
     for (int i=0; i<arp_count; i++) {
@@ -486,6 +589,8 @@ void stats_report(void) {
 
     flow_report();
 
+    stats_tunnel_report();
+    
     printf("\nCumulative: pkts=%lu bytes=%lu\n", total_pkts, total_bytes);
 
     // Reset interval counters
@@ -501,6 +606,10 @@ void stats_report(void) {
     global_stats.tcp_out_of_order = 0;
     tls_count = 0;  
     total_bytes = 0;
+
+    tunnel_stats.gre_pkts = tunnel_stats.gre_bytes = 0;
+    tunnel_stats.vxlan_pkts = tunnel_stats.vxlan_bytes = 0;
+    tunnel_stats.geneve_pkts = tunnel_stats.geneve_bytes = 0;
 
     talkers_sort_mode = SORT_BY_PKTS; 
     talkers_report();

@@ -4,6 +4,18 @@
 #include "parse_dns.h"
 #include "stats.h"
 
+const char* rcode_str(int rcode) {
+    switch (rcode) {
+        case 0: return "NOERROR";
+        case 1: return "FORMERR";
+        case 2: return "SERVFAIL";
+        case 3: return "NXDOMAIN";
+        case 4: return "NOTIMP";
+        case 5: return "REFUSED";
+        default: return "UNKNOWN";
+    }
+}
+
 static int read_qname(const uint8_t *p, uint16_t len, uint16_t *off, char *out, size_t outsz) 
 {
     size_t o = 0; uint16_t i = *off; int jumped = 0; uint16_t jump_to = 0;
@@ -35,7 +47,7 @@ static int read_qname(const uint8_t *p, uint16_t len, uint16_t *off, char *out, 
 
 static uint16_t be16(const void *v){ const uint8_t *p=v; return (p[0]<<8)|p[1]; }
 
-void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response)
+void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response, uint64_t now)
 {
     if (len < sizeof(struct dns_hdr)) { 
         printf("        DNS <truncated>\n"); 
@@ -46,10 +58,22 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response)
     uint16_t id      = be16(&h->id);
     uint16_t flags   = be16(&h->flags);
     uint16_t qdcount = be16(&h->qdcount);
-    uint16_t ancount = be16(&h->ancount);
+    uint16_t ancount = be16(&h->ancount);  
 
-    printf("        DNS %s id=0x%04x qd=%u an=%u flags=0x%04x\n",
-           is_response ? "RESP" : "QUERY", id, qdcount, ancount, flags);
+    int qr     = (flags >> 15) & 1;
+    int opcode = (flags >> 11) & 0xF;
+    int aa     = (flags >> 10) & 1;
+    int tc     = (flags >> 9)  & 1;
+    int rd     = (flags >> 8)  & 1;
+    int ra     = (flags >> 7)  & 1;
+    int rcode  = (flags & 0xF);     // response code (0=NOERROR, 3=NXDOMAIN, etc.)
+
+    printf("        DNS %s id=0x%04x qd=%u an=%u ",
+           qr ? "RESP" : "QUERY", id, qdcount, ancount);
+    if (qr)
+        printf("rcode=%s ", rcode_str(rcode));
+    printf("[AA=%d TC=%d RD=%d RA=%d OPCODE=%d]\n",
+           aa, tc, rd, ra, opcode);
 
     uint16_t off = sizeof(*h);
 
@@ -69,8 +93,10 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response)
 
         printf("          Q: %s  type=%u class=%u\n", name, qtype, qclass);
 
-        // record query in stats
-        stats_record_dns_query(id, name);
+        if (!qr) {
+            // record query in stats
+            stats_record_dns_query(id, name, now, len);
+        }
     }
 
     // Answers (print a couple for brevity)
@@ -95,7 +121,7 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response)
             return; 
         }
 
-        char ans[256] = {0};
+        char ans[512] = {0};
         printf("          A: %s  type=%u class=%u ttl=%u ", name, type, klass, ttl);
 
         if (type == 1 && rdlen == 4) { // A
@@ -121,13 +147,45 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response)
                 printf("CNAME=<bad>\n");
             }
 
+        } else if (type == 15) { // MX
+            if (rdlen >= 2) {
+                uint16_t pref = be16(payload + off);
+                uint16_t tmp = off + 2;
+                char exch[256];
+                if (read_qname(payload, len, &tmp, exch, sizeof(exch)) == 0) {
+                    snprintf(ans, sizeof(ans), "MX %u %s", pref, exch);
+                    printf("MX=%u %s\n", pref, exch);
+                }
+            }
+        }
+        else if (type == 16) { // TXT
+            if (rdlen > 0) {
+                int txtlen = payload[off];
+                if (txtlen < rdlen) {
+                    snprintf(ans, sizeof(ans), "TXT \"%.*s\"", txtlen, payload+off+1);
+                    printf("%s\n", ans);
+                }
+            }
+        }
+        else if (type == 33) { // SRV
+            if (rdlen >= 6) {
+                uint16_t prio = be16(payload + off);
+                uint16_t weight = be16(payload + off + 2);
+                uint16_t port = be16(payload + off + 4);
+                uint16_t tmp = off + 6;
+                char target[256];
+                if (read_qname(payload, len, &tmp, target, sizeof(target)) == 0) {
+                    snprintf(ans, sizeof(ans), "SRV %u %u %u %s", prio, weight, port, target);
+                    printf("SRV %u %u %u %s\n", prio, weight, port, target);
+                }
+            }
         } else {
             printf("RDATA len=%u (type=%u)\n", rdlen, type);
         }
 
         // record answer in stats
-        if (ans[0]) {
-            stats_record_dns_answer(id, name, ans);
+        if (qr && ans[0]) {
+            stats_record_dns_answer(id, name, ans, rcode, now, len);
         }
 
         off += rdlen;

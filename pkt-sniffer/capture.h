@@ -2,6 +2,8 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
+#include "tunnel_types.h"
 
 typedef enum {
     PV_KIND_STACK = 0,  // borrowed (owned by backend, e.g., static recv buffer)
@@ -12,6 +14,7 @@ typedef enum {
 typedef struct pkt_view {
     const uint8_t   *data;     // pointer to contiguous L2/L3 data
     uint16_t   len;      // valid length
+    bool       is_reassembled;
     char     src_ip[64];
     char     dst_ip[64];
     char     src_mac[32];   // NEW
@@ -22,6 +25,13 @@ typedef struct pkt_view {
     int l3_proto;            // AF_INET, AF_INET6, ETH_P_ARP
     pv_kind_t  kind;     // how to free
     void      *backing;  // heap ptr or rte_mbuf*
+
+    // --- Tunnel metadata ---
+    tunnel_info tunnel;   // holds GRE/VXLAN/GENEVE info
+    uint8_t is_tunnel;    // 1 if this pkt contains tunnel info
+    uint8_t tunnel_counted; // for stats
+    // --- Optional: recursive inner pkt view ---
+    struct pkt_view *inner_pkt;   // points to inner pkt_view if tunneled
 } pkt_view;
 
 // Backend lifecycle

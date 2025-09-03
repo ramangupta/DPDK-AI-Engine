@@ -105,12 +105,17 @@ struct tls_stat {
     char cipher[64];
 };
 
-struct dns_entry {
+typedef struct {
     uint16_t id;
     char qname[256];
-    char answers[DNS_MAX_ANS][46]; // each answer string (IPv4/IPv6/CNAME)
+    char answers[DNS_MAX_ANS][256];
     int nanswers;
-};
+    int rcode;             // response code
+    uint64_t ts_query;     // ns timestamp of query
+    uint64_t ts_resp;      // ns timestamp of response
+    int q_pkts, q_bytes;   // query counters
+    int r_pkts, r_bytes;   // response counters
+} dns_entry_t;
 
 typedef struct {
     char src[64];
@@ -122,6 +127,17 @@ typedef struct {
     uint64_t pkts;
     uint64_t bytes;
 } http_session_t;
+
+typedef struct tunnel_stats_s {
+    uint64_t gre_pkts;
+    uint64_t gre_bytes;
+
+    uint64_t vxlan_pkts;
+    uint64_t vxlan_bytes;
+
+    uint64_t geneve_pkts;
+    uint64_t geneve_bytes;
+} tunnel_stats_t;
 
 // Function prototypes
 
@@ -136,8 +152,10 @@ void stats_record_tls(const char *src, const char *dst,
                       const char *sni, const char *alpn,
                       const char *version, const char *cipher);
 
-void stats_record_dns_query(uint16_t id, const char *qname);
-void stats_record_dns_answer(uint16_t id, const char *qname, const char *answer);
+void stats_record_dns_query(uint16_t id, const char *qname, uint64_t now, int pktlen);
+void stats_record_dns_answer(uint16_t id, const char *qname, 
+                             const char *ans, int rcode, 
+                             uint64_t now_ns, int pktlen);
 void stats_report_dns(void);
 
 void stats_http_update(const char *src, const char *dst,
@@ -158,5 +176,7 @@ void stats_tcp_segment(uint16_t pktlen);
 void stats_tcp_duplicate(void);
 void stats_tcp_overlap(void);
 void stats_tcp_out_of_order(void);
+
+void stats_tunnel_update(pkt_view *pv);
 
 #endif

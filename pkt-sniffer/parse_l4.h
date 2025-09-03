@@ -4,6 +4,6 @@
 #include <stdint.h>
 #include "capture.h"
 
-void parse_l4(pkt_view *pv_full, pkt_view *pv_slice);
+void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now);
 
 #endif

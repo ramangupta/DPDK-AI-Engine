@@ -12,6 +12,7 @@
 #include "sniffer_signal.h"
 #include "utils.h"
 #include "tcp_reass.h"
+#include "parse_tunnel.h"
 
 // Main packet processing loop
 int main(int argc, char **argv) 
@@ -40,10 +41,30 @@ int main(int argc, char **argv)
 
                 // Parse the packet (this may do frag/reassembly internally)
                 parse_packet(pv, now);
-
                 // Just for extreme debugging ...
                 // pkt_view_dump(pv);
+                if (pv->is_tunnel && pv->inner_pkt) {
+                    // Print tunnel metadata for debugging / top talkers
+                    switch (pv->tunnel.type) {
+                        case TUNNEL_GRE:
+                            printf("[TOP] GRE tunnel: inner_proto=0x%04x flags=0x%04x len=%u\n",
+                                pv->tunnel.inner_proto, pv->tunnel.gre_flags, pv->inner_pkt->len);
+                            break;
+                        case TUNNEL_VXLAN:
+                            printf("[TOP] VXLAN tunnel: VNI=%u len=%u\n",
+                                pv->tunnel.vni, pv->inner_pkt->len);
+                            break;
+                        case TUNNEL_GENEVE:
+                            printf("[TOP] GENEVE tunnel: VNI=%u len=%u\n",
+                                pv->tunnel.vni, pv->inner_pkt->len);
+                            break;
+                        default:
+                            break;
+                    }
 
+                    // Update top talkers using inner packet if desired
+                    talkers_update(pv->inner_pkt ? pv->inner_pkt : pv);
+                }
                 /* Top Talkers Update */ 
                 talkers_update(pv);
 
@@ -51,6 +72,12 @@ int main(int argc, char **argv)
                 stats_poll(now);
 
                 pcap_writer_write(pv->data, pv->len);
+
+                // Optionally, write inner payload separately
+                if (pv->is_tunnel && pv->inner_pkt) {
+                    // You can adapt pcap_writer_write() to accept a label or new file
+                    pcap_writer_write((const uint8_t *)pv->inner_pkt, pv->inner_pkt->len);
+                }
             }
         }
         // Always free/release the packet view (whether frag, heap, or mbuf)
