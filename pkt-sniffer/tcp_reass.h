@@ -53,6 +53,7 @@ const char *tcp_flow_src_ip(const tcp_flow_t *flow);
 uint16_t    tcp_flow_src_port(const tcp_flow_t *flow);
 const char *tcp_flow_dst_ip(const tcp_flow_t *flow);
 uint16_t    tcp_flow_dst_port(const tcp_flow_t *flow);
-
+int         tcp_flow_l7_proto(const tcp_flow_t *flow);
+void        tcp_flow_set_l7_proto(tcp_flow_t *flow, int l7_proto);
 
 #endif /* TCP_REASS_H */

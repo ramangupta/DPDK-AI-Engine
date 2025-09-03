@@ -177,14 +177,58 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
     }
 #endif
 
+    if (len == 0) return;
+
     // Wrap in pkt_view so application parsers can use it
     pkt_view app_pv = {0};
     app_pv.data = (uint8_t*)data;
     app_pv.len  = len;
 
+    /// Fill src/dst IPs and ports based on direction
+    if (dir == 0) {
+        snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", tcp_flow_src_ip(flow));
+        snprintf(app_pv.dst_ip, sizeof(app_pv.dst_ip), "%s", tcp_flow_dst_ip(flow));
+        app_pv.src_port = tcp_flow_src_port(flow);
+        app_pv.dst_port = tcp_flow_dst_port(flow);
+    } else {
+        snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", tcp_flow_dst_ip(flow));
+        snprintf(app_pv.dst_ip, sizeof(app_pv.dst_ip), "%s", tcp_flow_src_ip(flow));
+        app_pv.src_port = tcp_flow_dst_port(flow);
+        app_pv.dst_port = tcp_flow_src_port(flow);
+    }
+
+
     // Future: set src/dst ports + IP strings for richer logging
     // e.g., snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", flow->src_ip);
 
+    // Heuristic: TLS vs HTTP
+    DEBUG_PRINT("[TCP CB RAW] %.*s\n----\n", (int)app_pv.len, (const char*)app_pv.data);
+
+    int l7_proto = tcp_flow_l7_proto(flow);
+
+    if (l7_proto == 0) {
+        if (data[0] == 0x16 && len >= 5) {
+            tcp_flow_set_l7_proto(flow, 2); // TLS
+            DEBUG_PRINT("  → Delivering to TLS parser\n");
+            parse_tls(&app_pv);
+        } else if ((data[0] >= 'A' && data[0] <= 'Z') || (len >= 5 && memcmp(data, "HTTP/", 5) == 0)) {
+            tcp_flow_set_l7_proto(flow, 1); // HTTP
+            DEBUG_PRINT("  → Delivering to HTTP parser\n");
+            parse_http(&app_pv);
+        } else {
+            DEBUG_PRINT("  → Unrecognized L7 payload (not HTTP/TLS)\n");
+        }
+    } else if (l7_proto == 1) {
+        DEBUG_PRINT("  → Same flow cont ... Delivering to HTTP parser\n");
+        // HTTP already identified
+        parse_http(&app_pv);
+    } else if (l7_proto == 2) {
+        DEBUG_PRINT("  → Same flow cont ... Delivering to TLS parser\n");
+        // TLS already identified
+        parse_tls(&app_pv);
+    }
+
+#if 0
     if (len > 0) {
         // Heuristic: TLS starts with 0x16 handshake
         if (data[0] == 0x16 && len >= 5) {
@@ -208,6 +252,7 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
             }
         }
     }
+#endif 
 }
 
 void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
