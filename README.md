@@ -7,6 +7,10 @@ Think of it as **tcpdump on steroids** — flow-aware, protocol-smart, and ready
 
 ---
 
+![Dashboard Screenshot](docs/dashboard.png)
+
+---
+
 ## ✨ Features
 
 ✅ **Capture Modes**  

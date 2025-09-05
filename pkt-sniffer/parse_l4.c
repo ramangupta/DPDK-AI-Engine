@@ -17,7 +17,7 @@
 #include "flows.h"
 
 #ifndef L4_DEBUG
-#define L4_DEBUG    1
+#define L4_DEBUG    0
 #endif
 
 #if L4_DEBUG
@@ -202,7 +202,9 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
     // e.g., snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", flow->src_ip);
 
     // Heuristic: TLS vs HTTP
+#if L4_DEBUG
     DEBUG_PRINT("[TCP CB RAW] %.*s\n----\n", (int)app_pv.len, (const char*)app_pv.data);
+#endif 
 
     int l7_proto = tcp_flow_l7_proto(flow);
 

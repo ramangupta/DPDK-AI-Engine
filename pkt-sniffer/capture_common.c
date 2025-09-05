@@ -31,8 +31,9 @@ pkt_view *capture_wrap(const uint8_t *data, size_t len) {
 
     pv->data    = data;
     pv->len     = len;
-    pv->kind    = PV_KIND_STACK;
+    pv->kind    = PV_KIND_HEAP;
     pv->backing = NULL;
+    pv->inner_pkt = NULL;
     return pv;
 }
 
@@ -54,25 +55,37 @@ pkt_view *capture_from_mbuf(struct rte_mbuf *mbuf) {
 void capture_free(pkt_view *pv) {
     if (!pv) return;
 
-    // free any inner packet first
+    // free inner packet first
     if (pv->inner_pkt) {
         capture_free(pv->inner_pkt);
         pv->inner_pkt = NULL;
     }
 
+    // free backing only if heap or mbuf
     switch (pv->kind) {
         case PV_KIND_HEAP:
-            free(pv->backing);
+            if (pv->backing) {
+                free(pv->backing);
+                pv->backing = NULL;
+            }
             break;
         case PV_KIND_MBUF:
-        #ifdef USE_DPDK
-            rte_pktmbuf_free((struct rte_mbuf *)pv->backing);
-        #endif
+#ifdef USE_DPDK
+            if (pv->backing) {
+                rte_pktmbuf_free((struct rte_mbuf *)pv->backing);
+                pv->backing = NULL;
+            }
+#endif
             break;
         case PV_KIND_STACK:
         default:
             break; // nothing to free
     }
-    free(pv);
+
+    // free pv itself only if heap or mbuf
+    if (pv->kind == PV_KIND_HEAP || pv->kind == PV_KIND_MBUF) {
+        free(pv);
+    }
 }
+
 

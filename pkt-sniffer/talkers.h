@@ -12,6 +12,19 @@ enum sort_mode {
     SORT_BY_BYTES
 };
 
+struct talker {
+    char flow[128];     // "src_ip:src_port -> dst_ip:dst_port proto"
+    char proto[8];    // "TCP", "UDP", "ICMP", etc.
+    uint64_t pkts;
+    uint64_t bytes;
+};
+
+extern struct talker table[MAX_TALKERS];
+extern int used;
+
+int cmp_bytes(const void *a, const void *b);
+int cmp_pkts(const void *a, const void *b);
+
 void talkers_update(const pkt_view *pv);
 void talkers_report(void);
 void talkers_reset(void);

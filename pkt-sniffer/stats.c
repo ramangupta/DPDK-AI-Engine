@@ -10,6 +10,8 @@
 #include "utils.h"
 #include "parse_dns.h"
 #include <math.h>
+#include "stats_json.h"
+#include "sniffer_proto.h"
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
@@ -24,7 +26,7 @@ static int arp_count = 0;
 static struct frag_stat frag_table[MAX_FRAG];
 static int frag_count = 0;
 
-static struct tls_stat tls_table[MAX_TLS];
+tls_entry_t tls_table[MAX_TLS];
 static int tls_count = 0;
 
 dns_entry_t dns_table[DNS_MAX_ENTRIES];
@@ -34,7 +36,7 @@ static http_session_t http_sessions[MAX_HTTP_SESSIONS];
 static int http_session_count = 0;
 
 proto_stats_t proto_stats[MAX_PROTO] = {0};
-static tunnel_stats_t tunnel_stats = {0};
+tunnel_stats_t tunnel_stats = {0};
 
 // ------------------- TCP Reassembly Stats -------------------
 void stats_tcp_segment(uint16_t pktlen) {
@@ -54,21 +56,39 @@ void stats_tcp_overlap(void) {
 void stats_tcp_out_of_order(void) {
     global_stats.tcp_out_of_order++;
 }
+
+// ---------------- Accessor Functions -------------------------
+// stats.c
+uint64_t stats_get_total_pkts(void) { return total_pkts; }
+uint64_t stats_get_total_bytes(void) { return total_bytes; }
+int stats_get_tls_count(void) { return tls_count; }
+tls_entry_t* stats_get_tls_table(void) { return tls_table; }
+int stats_get_arp_count(void) { return arp_count; }
+struct arp_stat* stats_get_arp_table(void) { return arp_table; }
+struct dhcp_stat *stats_get_dhcp_table(void) { return dhcp_table; }
+int stats_get_dhcp_count(void) { return dhcp_count; }
+dns_entry_t *stats_get_dns_table(void) { return dns_table; }
+int stats_get_dns_count(void) { return dns_count; }
+http_session_t *stats_get_http_table(void) { return http_sessions; }
+int stats_get_http_count(void) { return http_session_count; }
+struct frag_stat *stats_get_frag_table(void) { return frag_table; }
+int stats_get_frag_count(void) { return frag_count; }
 // -------------------------------------------------------------
 
-const char *proto_name(enum proto_type p) {
-    switch (p) {
-    case PROTO_IPV4: return "IPv4";
-    case PROTO_IPV6: return "IPv6";
-    case PROTO_TCP: return "TCP";
-    case PROTO_UDP: return "UDP";
-    case PROTO_ICMP: return "ICMP";
-    case PROTO_DNS: return "DNS";
-    case PROTO_ARP: return "ARP";
-    case PROTO_TLS_HANDSHAKE: return "TLS-HS";
-    case PROTO_TLS_APPDATA: return "TLS-App";
-    case PROTO_HTTP: return "HTTP";
-    default: return "OTHER";
+
+const char *protocol_name(enum proto_type p) {
+    switch(p) {
+        case PROTO_IPV4: return "IPv4";
+        case PROTO_IPV6: return "IPv6";
+        case PROTO_TCP:  return "TCP";
+        case PROTO_UDP:  return "UDP";
+        case PROTO_ICMP: return "ICMP";
+        case PROTO_DNS:  return "DNS";
+        case PROTO_ARP:  return "ARP";
+        case PROTO_TLS_HANDSHAKE: return "TLS-HS";
+        case PROTO_TLS_APPDATA: return "TLS-App";
+        case PROTO_HTTP: return "HTTP";
+        default: return "OTHER";
     }
 }
 
@@ -281,18 +301,23 @@ void stats_record_dns_answer(uint16_t id, const char *qname, const char *ans,
 
 void stats_record_tls(const char *src, const char *dst,
                       const char *sni, const char *alpn,
-                      const char *version, const char *cipher)
+                      const char *version, const char *cipher,
+                      const char *subject, const char *issuer)
 {
-    if (tls_count < MAX_TLS) {
-        snprintf(tls_table[tls_count].src, sizeof(tls_table[tls_count].src), "%s", src);
-        snprintf(tls_table[tls_count].dst, sizeof(tls_table[tls_count].dst), "%s", dst);
-        snprintf(tls_table[tls_count].sni, sizeof(tls_table[tls_count].sni), "%s", sni ? sni : "-");
-        snprintf(tls_table[tls_count].alpn, sizeof(tls_table[tls_count].alpn), "%s", alpn ? alpn : "-");
-        snprintf(tls_table[tls_count].version, sizeof(tls_table[tls_count].version), "%s", version ? version : "-");
-        snprintf(tls_table[tls_count].cipher, sizeof(tls_table[tls_count].cipher), "%s", cipher ? cipher : "-");
-        tls_count++;
-    }
+    if (tls_count >= MAX_TLS) return;
+
+    tls_entry_t *e = &tls_table[tls_count++];
+
+    snprintf(e->src, sizeof(e->src), "%s", src);
+    snprintf(e->dst, sizeof(e->dst), "%s", dst);
+    snprintf(e->sni, sizeof(e->sni), "%s", sni);
+    snprintf(e->alpn, sizeof(e->alpn), "%s", alpn);
+    snprintf(e->version, sizeof(e->version), "%s", version);
+    snprintf(e->cipher, sizeof(e->cipher), "%s", cipher);
+    snprintf(e->subject, sizeof(e->subject), "%s", subject ? subject : "-");
+    snprintf(e->issuer, sizeof(e->issuer), "%s", issuer ? issuer : "-");
 }
+
 
 void stats_http_update(const char *src, const char *dst,
                        const char *host, const char *method,
@@ -379,6 +404,19 @@ void stats_http_print(void)
     }
 }
 
+void stats_report_tls(void) 
+{
+    printf("\n=== TLS Handshakes ===\n");
+    for (int i = 0; i < tls_count; i++) {
+        tls_entry_t *e = &tls_table[i];
+        printf("Flow: %s → %s\n", e->src, e->dst);
+        printf("   SNI=%s  ALPN=%s  Version=%s  Cipher=%s\n",
+               e->sni, e->alpn, e->version, e->cipher);
+        printf("   Cert: Subject=\"%s\"  Issuer=\"%s\"\n",
+               e->subject, e->issuer);
+    }
+}
+
 void stats_poll(uint64_t now_tsc) {
     static uint64_t last_report = 0;
     static uint64_t last_maint  = 0;
@@ -454,7 +492,8 @@ void stats_report_dns(void)
 }
 
 
-void stats_tunnel_report(void) {
+void stats_tunnel_report(void) 
+{
     printf("\n=== Tunnel Stats ===\n");
     printf("%-10s %-10s %-12s\n", "Tunnel", "Pkts", "Bytes");
     char buf[32];
@@ -469,7 +508,10 @@ void stats_tunnel_report(void) {
 
 }
 
-void stats_report(void) {
+void stats_report(void) 
+{
+    write_stats_json();
+
     uint64_t pkt_sum = global_stats.ipv4 + global_stats.ipv6 +
                        global_stats.tcp + global_stats.udp +
                        global_stats.icmp + global_stats.dns +
@@ -554,13 +596,7 @@ void stats_report(void) {
 
     stats_http_print();
 
-    printf("\n=== TLS Sessions ===\n");
-    for (int i=0; i<tls_count; i++) {
-        printf("%s → %s  SNI=%s  Version=%s  ALPN=%s  Cipher=%s\n",
-            tls_table[i].src, tls_table[i].dst,
-            tls_table[i].sni, tls_table[i].version,
-            tls_table[i].alpn, tls_table[i].cipher);
-    }
+    stats_report_tls();
 
     printf("\n=== Per Protocol Stats (%d sec) ===\n", REPORT_INTERVAL);
     printf("%-15s %-10s %-12s %-12s\n",
@@ -577,7 +613,7 @@ void stats_report(void) {
         format_bandwidth(bps, bwbuf, sizeof(bwbuf));
         format_bytes(proto_stats[p].bytes_interval, bytebuf, sizeof(bytebuf));
         printf("%-15s %-10lu %-12s %-12s\n",
-               proto_name(p),
+               protocol_name(p),
                proto_stats[p].pkts_interval,
                bytebuf,
                bwbuf);

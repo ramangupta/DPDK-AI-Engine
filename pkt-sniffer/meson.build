@@ -28,9 +28,14 @@ sources = [
   'tcp_reass.c',
   'flows.c',
   'parse_tunnel.c',
+  'parse_tls_cert.c',
+  'stats_json.c',
 ]
 
 deps = []
+
+# Find json-c dependency
+jsonc_dep = dependency('json-c', required: true)
 
 if capture_backend == 'afp'
   sources += ['capture_afp.c', 'time_afp.c']
@@ -45,6 +50,9 @@ elif capture_backend == 'dpdk'
 else
   error('Unsupported capture backend: ' + capture_backend)
 endif
+
+# Add json-c to dependencies
+deps += [jsonc_dep]
 
 executable('pkt-sniffer',
            sources,

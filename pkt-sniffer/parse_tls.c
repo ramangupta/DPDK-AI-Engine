@@ -6,6 +6,8 @@
 #include "capture.h"
 #include "utils.h"
 #include "stats.h"
+#include "parse_tls.h"
+#include "parse_tls_cert.h"
 
 // Toggle to 1 for detailed hex dumps when bounds fail
 #ifndef TLS_DEBUG
@@ -209,29 +211,56 @@ void parse_tls(const pkt_view *pv)
                 uint32_t hs_len  = be24(hs + 1);
                 if (hp + 4u + hs_len > rpay) break;
 
+                char srcbuf[80], dstbuf[80];
+                snprintf(srcbuf, sizeof(srcbuf), "%s:%u", pv->src_ip, pv->src_port);
+                snprintf(dstbuf, sizeof(dstbuf), "%s:%u", pv->dst_ip, pv->dst_port);
+
                 if (hs_type == 1) { // ClientHello
                     printf("      TLS Handshake: ClientHello (len=%u)\n", hs_len);
                     parse_client_hello(hs + 4, hs_len, &meta);
-                    char srcbuf[80], dstbuf[80];
-                    snprintf(srcbuf, sizeof(srcbuf), "%s:%u", pv->src_ip, pv->src_port);
-                    snprintf(dstbuf, sizeof(dstbuf), "%s:%u", pv->dst_ip, pv->dst_port);
+                    
                     stats_record_tls(srcbuf, dstbuf,
                         meta.sni[0] ? meta.sni : "-",
                         meta.alpn[0] ? meta.alpn : "-",
                         meta.version[0] ? meta.version : "-",
-                        "-");
+                        "-", "-", "-");
                 } else if (hs_type == 2) { // ServerHello
                     printf("      TLS Handshake: ServerHello (len=%u)\n", hs_len);
                     parse_server_hello(hs + 4, hs_len, &meta);
-                    char srcbuf[80], dstbuf[80];
-                    snprintf(srcbuf, sizeof(srcbuf), "%s:%u", pv->src_ip, pv->src_port);
-                    snprintf(dstbuf, sizeof(dstbuf), "%s:%u", pv->dst_ip, pv->dst_port);
+                    
                     stats_record_tls(srcbuf, dstbuf,
                         "-",
                         meta.alpn[0] ? meta.alpn : "-",
                         meta.version[0] ? meta.version : "-",
-                        meta.cipher[0] ? meta.cipher : "-");
+                        meta.cipher[0] ? meta.cipher : "-", "-", "-");
+                } else if (hs_type == 11) { // Certificate
+                    printf("      TLS Handshake: Certificate (len=%u)\n", hs_len);
+
+                    const uint8_t *q = hs + 4;        // skip handshake header
+                    size_t remain = hs_len;           // hs_len is payload length, NOT including 4 header bytes
+
+                    if (remain < 3) continue;
+                    uint32_t list_len = be24(q); q += 3; remain -= 3;
+                    if (list_len > remain) list_len = remain;
+
+                    if (list_len < 3) continue;
+                    uint32_t cert_len = be24(q); q += 3; remain -= 3;
+                    if (cert_len > remain) cert_len = remain;
+
+                    char subject[128] = "-";
+                    char issuer[128]  = "-";
+
+                    tls_parse_cert(q, cert_len, subject, sizeof(subject), issuer, sizeof(issuer));
+
+                    stats_record_tls(srcbuf, dstbuf,
+                        meta.sni[0] ? meta.sni : "-",
+                        meta.alpn[0] ? meta.alpn : "-",
+                        meta.version[0] ? meta.version : "-",
+                        meta.cipher[0] ? meta.cipher : "-",
+                        subject,
+                        issuer);
                 }
+
                 hp += 4u + hs_len;
             }
         }
@@ -239,3 +268,5 @@ void parse_tls(const pkt_view *pv)
         remain -= 5u + rlen;
     }
 }
+
+

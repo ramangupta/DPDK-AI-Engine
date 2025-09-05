@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DPDK AI Engine — Live Stats</title>
+  <!-- Tailwind CDN (for quick styling) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background: #0f172a; color: #e6eef8; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.03); }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+  <header class="mb-6 flex items-center gap-4">
+    <div class="w-12 h-12 bg-white/10 rounded flex items-center justify-center">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="3" width="7" height="7" fill="#60A5FA"/><rect x="14" y="3" width="7" height="7" fill="#34D399"/><rect x="3" y="14" width="7" height="7" fill="#F97316"/><rect x="14" y="14" width="7" height="7" fill="#F472B6"/></svg>
+    </div>
+    <div>
+      <h1 class="text-2xl font-bold">DPDK AI Engine — Live Stats</h1>
+      <p class="text-sm text-slate-300">Auto-updating dashboard. Data source: <code class="mono">/stats.json</code></p>
+    </div>
+    <div class="ml-auto text-sm text-slate-400">Polling: <span id="poll-interval">2s</span></div>
+  </header>
+
+  <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Summary cards -->
+    <section class="lg:col-span-1 space-y-4">
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Summary</h2>
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <div class="p-3 rounded bg-white/2">
+            <div class="text-xs text-slate-300">Total Pkts</div>
+            <div id="total-pkts" class="text-xl font-bold">—</div>
+          </div>
+          <div class="p-3 rounded bg-white/2">
+            <div class="text-xs text-slate-300">Total Bytes</div>
+            <div id="total-bytes" class="text-xl font-bold">—</div>
+          </div>
+          <div class="p-3 rounded bg-white/2">
+            <div class="text-xs text-slate-300">PPS</div>
+            <div id="pps" class="text-xl font-bold">—</div>
+          </div>
+          <div class="p-3 rounded bg-white/2">
+            <div class="text-xs text-slate-300">Bandwidth KB/s</div>
+            <div id="kbps" class="text-xl font-bold">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Packet Summary (last 5s)</h2>
+        <canvas id="summary-pie" height="180"></canvas>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">TCP Reassembly</h2>
+        <div class="mt-3 text-sm space-y-2">
+          <div>Segments: <span id="tcp-seg">—</span></div>
+          <div>Bytes: <span id="tcp-bytes">—</span></div>
+          <div>Duplicates: <span id="tcp-dups">—</span></div>
+          <div>Overlaps: <span id="tcp-ovl">—</span></div>
+          <div>Out-of-order: <span id="tcp-ooo">—</span></div>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">ARP Entries</h2>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr><th>IP</th><th>MAC</th></tr>
+            </thead>
+            <tbody id="arp-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Tunnels</h2>
+        <div class="mt-3 text-sm space-y-2">
+          <div>GRE: <span id="tun-gre">0 pkts / 0 B</span></div>
+          <div>VXLAN: <span id="tun-vxlan">0 pkts / 0 B</span></div>
+          <div>GENEVE: <span id="tun-geneve">0 pkts / 0 B</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="lg:col-span-2 space-y-6">
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Bandwidth (bps) — last N polls</h2>
+        <canvas id="chart-line" height="120"></canvas>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Per-protocol (pkts / bytes)</h2>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <canvas id="chart-bar" height="160"></canvas>
+          </div>
+          <div class="overflow-auto">
+            <table class="w-full text-sm mono">
+              <thead class="text-slate-300 text-xs p-2">
+                <tr><th class="text-left">Proto</th><th class="text-right">Pkts</th><th class="text-right">Bytes</th><th class="text-right">Bps</th></tr>
+              </thead>
+              <tbody id="proto-table" class="text-slate-200"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">Fragment Table</h2>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr>
+                <th>Version</th>
+                <th>Src</th>
+                <th>Dst</th>
+                <th>ID</th>
+                <th>Count</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="frag-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg">
+        <h2 class="text-lg font-semibold">DNS Queries</h2>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr><th>QName</th><th>Answer</th></tr>
+            </thead>
+            <tbody id="dns-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="card p-4 rounded-lg mt-6 lg:col-span-3">
+        <h2 class="text-lg font-semibold">Active Flows</h2>
+        <div class="overflow-auto max-h-96">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr>
+                <th class="text-left">Src</th>
+                <th class="text-left">Dst</th>
+                <th class="text-left">Proto</th>
+                <th class="text-right">Pkts</th>
+                <th class="text-right">Bytes</th>
+                <th class="text-right">Duration</th>
+                <th class="text-right">AvgPkt</th>
+                <th class="text-right">Throughput bps</th>
+              </tr>
+            </thead>
+            <tbody id="flows-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg mt-6 lg:col-span-3">
+        <h2 class="text-lg font-semibold">Top Talkers (Last Interval)</h2>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr><th class="text-left">Flow</th><th class="text-left">Proto</th><th class="text-right">Pkts</th><th class="text-right">Bytes</th></tr>
+            </thead>
+            <tbody id="talkers-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg mt-6 lg:col-span-3 bg-slate-800">
+        <h2 class="text-lg font-semibold text-slate-100">HTTP Sessions</h2>
+        <div class="overflow-auto max-h-64 mt-2">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr>
+                <th class="text-left">Src</th>
+                <th class="text-left">Dst</th>
+                <th class="text-left">Host</th>
+                <th class="text-left">Method</th>
+                <th class="text-left">URI</th>
+                <th class="text-left">Status</th>
+                <th class="text-right">Pkts</th>
+                <th class="text-right">Bytes</th>
+              </tr>
+            </thead>
+            <tbody id="http-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg mt-6 lg:col-span-3 bg-slate-800">
+        <h2 class="text-lg font-semibold text-slate-100">TLS Sessions</h2>
+        <div class="overflow-auto max-h-64 mt-2">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr>
+                <th class="text-left">Src</th>
+                <th class="text-left">Dst</th>
+                <th class="text-left">SNI</th>
+                <th class="text-left">ALPN</th>
+                <th class="text-left">Version</th>
+                <th class="text-left">Cipher</th>
+                <th class="text-left">Subject</th>
+                <th class="text-left">Issuer</th>
+              </tr>
+            </thead>
+            <tbody id="tls-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card p-4 rounded-lg mt-6 lg:col-span-3">
+        <h2 class="text-lg font-semibold">DHCP Packets</h2>
+        <div class="overflow-auto max-h-64">
+          <table class="w-full text-sm mono">
+            <thead class="text-slate-300 text-xs p-2">
+              <tr><th>XID</th><th>Type</th><th>YiAddr</th></tr>
+            </thead>
+            <tbody id="dhcp-table" class="text-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+  </main>
+
+  <footer class="mt-8 text-sm text-slate-400">Updated: <span id="updated">-</span></footer>
+
+<script>
+// Configuration
+const POLL_INTERVAL_MS = 2000;
+const MAX_POINTS = 40;
+
+function fmtBytes(n) { if (n==null) return '-'; const u=['B','KB','MB','GB']; let i=0; while(n>=1024 && i<u.length-1){n/=1024;i++;} return n.toFixed(i?2:0)+' '+u[i]; }
+function fmtNum(n){ return (n==null) ? '-' : n.toLocaleString(); }
+
+// Charts
+const lineCtx = document.getElementById('chart-line').getContext('2d');
+const barCtx = document.getElementById('chart-bar').getContext('2d');
+const pieCtx = document.getElementById('summary-pie').getContext('2d');
+
+let lineChart = new Chart(lineCtx, {
+  type: 'line', 
+  data: { labels:[], datasets:[{label:'bandwidth bps', data:[], borderColor:'#60A5FA', backgroundColor:'rgba(96,165,250,0.12)', tension:0.3}]}, 
+  options:{animation:false, plugins:{legend:{display:false}}, scales:{x:{display:false}}}
+});
+let barChart = new Chart(barCtx, { 
+  type:'bar', 
+  data:{ labels:[], datasets:[{label:'pkts', data:[], backgroundColor:'#34D399'},{label:'bytes', data:[], backgroundColor:'#F97316'}]}, 
+  options:{animation:false, indexAxis:'x', plugins:{legend:{position:'bottom'}}}
+});
+let summaryPieChart = new Chart(pieCtx, {
+  type: 'pie',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      backgroundColor: [
+        '#60A5FA','#34D399','#F97316','#F472B6',
+        '#EAB308','#8B5CF6','#14B8A6','#F43F5E',
+        '#22D3EE','#A3E635'
+      ]
+    }]
+  },
+  options: {
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: '#E5E7EB'   // legend text color
+        }
+      }
+    }
+  }
+});
+
+
+async function fetchStats(){
+  try{
+    const res = await fetch('../../pkt-sniffer/stats.json?_=' + Date.now());
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const js = await res.json();
+    updateUI(js);
+  }catch(e){ console.error('fetchStats', e); }
+}
+
+function updateUI(js){
+  const s = js.summary || {};
+
+  // --- Summary Cards ---
+  document.getElementById('total-pkts').textContent = fmtNum(s.total_pkts);
+  document.getElementById('total-bytes').textContent = fmtBytes(s.total_bytes);
+  document.getElementById('pps').textContent = (s.pps!=null)?s.pps.toFixed(1):'-';
+  document.getElementById('kbps').textContent = (s.bandwidth_kbps!=null)?s.bandwidth_kbps.toFixed(2):'-';
+
+  // --- Update Summary Pie Chart ---
+  const perProto = s.per_proto || {};
+  const pieLabels = [], pieData = [];
+  for (let key in perProto) {
+    pieLabels.push(key.toUpperCase());
+    pieData.push(perProto[key]);
+  }
+  summaryPieChart.data.labels = pieLabels;
+  summaryPieChart.data.datasets[0].data = pieData;
+  summaryPieChart.update();
+
+  // --- Fragments Table ---
+  const fragTable = document.getElementById('frag-table');
+  if (fragTable) {
+    fragTable.innerHTML = '';
+    const frags = js.fragments || [];
+    frags.forEach(f => {
+      const tr = document.createElement('tr');
+      const statusColor = f.status === "DONE" ? "text-green-400" : "text-yellow-400";
+      tr.innerHTML = `<td>${f.version}</td><td>${f.src}</td><td>${f.dst}</td>
+                <td>${f.id}</td><td class="text-right">${f.count}</td>
+                <td class="${statusColor}">${f.status}</td>`;
+      fragTable.appendChild(tr);
+    });
+  }
+
+  // --- TCP Reassembly ---
+  const tr = js.tcp_reassembly || {};
+  document.getElementById('tcp-seg').textContent = fmtNum(tr.segments);
+  document.getElementById('tcp-bytes').textContent = fmtBytes(tr.bytes);
+  document.getElementById('tcp-dups').textContent = fmtNum(tr.duplicates);
+  document.getElementById('tcp-ovl').textContent = fmtNum(tr.overlaps);
+  document.getElementById('tcp-ooo').textContent = fmtNum(tr.out_of_order);
+
+  // --- Tunnels ---
+  const t = js.tunnels || {};
+  document.getElementById('tun-gre').textContent = (t.gre_pkts||0)+' pkts / '+(t.gre_bytes||0)+' B';
+  document.getElementById('tun-vxlan').textContent = (t.vxlan_pkts||0)+' pkts / '+(t.vxlan_bytes||0)+' B';
+  document.getElementById('tun-geneve').textContent = (t.geneve_pkts||0)+' pkts / '+(t.geneve_bytes||0)+' B';
+
+  // --- Bandwidth Line Chart ---
+  const now = new Date();
+  const bps = (js.per_protocol && js.per_protocol.reduce)
+  ? js.per_protocol.reduce((a,b)=>a+(b.bandwidth_bps||0),0) 
+  : (s.bandwidth_kbps? s.bandwidth_kbps*1000 : 0);
+  addPoint(lineChart, now.toLocaleTimeString(), Math.round(bps));
+
+  // --- Per-Protocol Table & Bar Chart ---
+  const protoTable = document.getElementById('proto-table'); protoTable.innerHTML = '';
+  const per = js.per_protocol || [];
+  const labels = [], pktsData = [], bytesData = [];
+  per.forEach(p => {
+    labels.push(p.proto);
+    pktsData.push(p.pkts||0);
+    bytesData.push(Math.round(p.bytes||0));
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.proto}</td><td class="text-right">${(p.pkts||0).toLocaleString()}</td><td class="text-right">${(p.bytes||0).toLocaleString()}</td><td class="text-right">${(p.bandwidth_bps||0).toLocaleString()}</td>`;
+    protoTable.appendChild(tr);
+  });
+  barChart.data.labels = labels; barChart.data.datasets[0].data = pktsData; barChart.data.datasets[1].data = bytesData; barChart.update();
+
+  document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+
+   // --- Active Flows ---
+  const flowsTable = document.getElementById('flows-table');
+  if (flowsTable) {
+    flowsTable.innerHTML = ''; // clear old rows
+    const flows = js.flows || [];
+    flows.forEach(f => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${f.src}</td><td>${f.dst}</td><td>${f.proto}</td>
+                      <td class="text-right">${f.pkts}</td><td class="text-right">${f.bytes}</td>
+                      <td class="text-right">${f.duration_sec.toFixed(3)}</td>
+                      <td class="text-right">${f.avg_pkt_bytes.toFixed(1)}</td>
+                      <td class="text-right">${Math.round(f.throughput_bps)}</td>`;
+      flowsTable.appendChild(tr);
+    });
+  }
+
+  // --- Top Talkers ---
+  const talkersTable = document.getElementById('talkers-table');
+  if (talkersTable) {
+    talkersTable.innerHTML = ''; // clear old rows
+    const talkers = js.top_talkers || []; // use "top_talkers" key from JSON
+    talkers.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${t.flow}</td><td>${t.proto}</td>
+                      <td class="text-right">${t.pkts}</td><td class="text-right">${t.bytes}</td>`;
+      talkersTable.appendChild(tr);
+    });
+  }
+
+  // --- DNS ---
+  const dnsTable = document.getElementById('dns-table');
+  if(dnsTable){
+    dnsTable.innerHTML = '';
+    (js.dns || []).forEach(d => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${d.qname}</td><td>${d.answer}</td>`;
+      dnsTable.appendChild(tr);
+    });
+  }
+
+  // --- ARP ---
+  const arpTable = document.getElementById('arp-table');
+  if(arpTable){
+    arpTable.innerHTML = '';
+    (js.arp || []).forEach(a => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${a.ip}</td><td>${a.mac}</td>`;
+      arpTable.appendChild(tr);
+    });
+  }
+
+  // --- DHCP ---
+  const dhcpTable = document.getElementById('dhcp-table');
+  if(dhcpTable){
+    dhcpTable.innerHTML = '';
+    (js.dhcp || []).forEach(d => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${d.xid}</td><td>${d.type}</td><td>${d.yiaddr}</td>`;
+      dhcpTable.appendChild(tr);
+    });
+  }
+
+  // --- HTTP Table ---
+  const httpTable = document.getElementById('http-table');
+    if(httpTable){
+    httpTable.innerHTML = '';
+    (js.http_sessions || []).forEach(s => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${s.src}</td>
+            <td>${s.dst}</td>
+            <td>${s.host}</td>
+            <td>${s.method}</td>
+            <td>${s.uri}</td>
+            <td>${s.status || '-'}</td>
+            <td class="text-right">${s.pkts}</td>
+            <td class="text-right">${s.bytes}</td>
+        `;
+        httpTable.appendChild(tr);
+    });
+  }
+
+  // --- TLS Table ---
+  const tlsTable = document.getElementById('tls-table');
+    if(tlsTable){
+    tlsTable.innerHTML = '';
+    (js.tls_sessions || []).forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+          <td>${s.src}</td>
+          <td>${s.dst}</td>
+          <td>${s.sni}</td>
+          <td>${s.alpn}</td>
+          <td>${s.version}</td>
+          <td>${s.cipher}</td>
+          <td>${s.subject}</td>
+          <td>${s.issuer}</td>
+      `;
+      tlsTable.appendChild(tr);
+   });
+ }
+  // --- Updated Timestamp ---
+  document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+}
+
+
+function addPoint(chart, label, value){
+  chart.data.labels.push(label);
+  chart.data.datasets[0].data.push(value);
+  if(chart.data.labels.length>MAX_POINTS){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+  chart.update();
+}
+
+// poll
+setInterval(fetchStats, POLL_INTERVAL_MS);
+fetchStats();
+</script>
+</body>
+</html>

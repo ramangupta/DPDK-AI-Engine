@@ -18,6 +18,8 @@
 #define MAX_HTTP_SESSIONS 1024
 #define ARP_MAX_ENTRIES 64
 
+extern struct stats global_stats;
+
 enum ip_version { IPV4 = 4, IPV6 = 6 };
 
 // Enum for protocol classification
@@ -35,6 +37,8 @@ enum proto_type {
     PROTO_HTTP,
     MAX_PROTO
 };
+
+const char *protocol_name(enum proto_type p); 
 
 /* Per protocol Bandwidth */
 typedef struct {
@@ -96,14 +100,16 @@ struct frag_stat {
     int done;
 };
 
-struct tls_stat {
-    char src[64];
-    char dst[64];
-    char sni[128];
+typedef struct {
+    char src[64], dst[64];
+    char sni[256];
     char alpn[64];
     char version[16];
     char cipher[64];
-};
+    char subject[128];
+    char issuer[128];
+} tls_entry_t;
+
 
 typedef struct {
     uint16_t id;
@@ -150,7 +156,9 @@ void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip);
 void stats_record_arp(const char *ip, const char *mac);
 void stats_record_tls(const char *src, const char *dst,
                       const char *sni, const char *alpn,
-                      const char *version, const char *cipher);
+                      const char *version, const char *cipher,
+                      const char *subject, const char *issuer);
+
 
 void stats_record_dns_query(uint16_t id, const char *qname, uint64_t now, int pktlen);
 void stats_record_dns_answer(uint16_t id, const char *qname, 
@@ -179,4 +187,18 @@ void stats_tcp_out_of_order(void);
 
 void stats_tunnel_update(pkt_view *pv);
 
+uint64_t stats_get_total_pkts(void);
+uint64_t stats_get_total_bytes(void);
+int stats_get_tls_count(void);
+tls_entry_t* stats_get_tls_table(void);
+int stats_get_arp_count(void);
+struct arp_stat* stats_get_arp_table(void);
+struct dhcp_stat *stats_get_dhcp_table(void);
+int stats_get_dhcp_count(void);
+dns_entry_t *stats_get_dns_table(void);
+int stats_get_dns_count(void);
+http_session_t *stats_get_http_table(void);
+int stats_get_http_count(void);
+struct frag_stat *stats_get_frag_table(void);
+int stats_get_frag_count(void);
 #endif

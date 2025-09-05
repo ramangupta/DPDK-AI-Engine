@@ -32,7 +32,7 @@ typedef pthread_mutex_t flow_lock_t;
 
 // Debug toggle
 #ifndef TCP_DEBUG
-#define TCP_DEBUG 1
+#define TCP_DEBUG 0
 #endif
 
 #if TCP_DEBUG
@@ -515,7 +515,6 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
             else f->s2d_bytes_buf = 0;
             goto out_unlock;
         }
-
         try_deliver(f, &f->s2d_head, &f->next_s2d, 0, deliver_cb, user_ctx);
         // after try_deliver, some segs delivered — recompute buffer counter by scanning list or subtract delivered bytes inside try_deliver
         // (we'll subtract delivered bytes in try_deliver later)
@@ -544,7 +543,6 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
             else f->d2s_bytes_buf = 0;
             goto out_unlock;
         }
-
         try_deliver(f, &f->d2s_head, &f->next_d2s, 1, deliver_cb, user_ctx);
     }
 

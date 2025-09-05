@@ -42,11 +42,10 @@ void parse_http(const pkt_view *pv) {
     const char *end = memchr(data, '\n', pv->len);
     if (!end) return;
 
-#ifdef HTTP_DEBUG
+#if HTTP_DEBUG
     fwrite(pv->data, 1, pv->len, stdout);
     printf("\n----\n");
 #endif
-
     size_t line_len = end - data;
     if (line_len > 200) line_len = 200;
 
@@ -61,8 +60,10 @@ void parse_http(const pkt_view *pv) {
     int code = 0;
     char reason[64] = {0};
 
+#if HTTP_DEBUG
     DEBUG_PRINT("[HTTP RAW] %.*s\n----\n", (int)pv->len, (const char*)pv->data);
-
+#endif 
+    
     // --- Detect request line ---
     if (!strncasecmp(line, "GET ", 4) || !strncasecmp(line, "POST ", 5) ||
         !strncasecmp(line, "PUT ", 4) || !strncasecmp(line, "DELETE ", 7) ||
@@ -121,6 +122,6 @@ void parse_http(const pkt_view *pv) {
                       uri_str,
                       statusbuf[0] ? statusbuf : NULL,
                       pv->len);
-
+    
     stats_update(PROTO_HTTP, pv->len);
 }

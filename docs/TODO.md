@@ -22,3 +22,26 @@ todo_md = """# TODO List – Packet Sniffer Project
 10. Unit tests for flow table insert/expire/lookup logic
 """
 
+📦 Packet Summary (pkts/sec, bandwidth)
+
+📡 DHCP Transactions
+
+🌐 DNS Transactions
+
+🔁 ARP Seen
+
+✂️ IPv4/IPv6 Fragments
+
+🔗 TCP Reassembly Stats
+
+🌍 HTTP Sessions
+
+🔒 TLS Sessions
+
+📊 Per Protocol Stats (5 sec)
+
+🔥 Flow Stats
+
+🚇 Tunnel Stats (GRE/VXLAN/GENEVE)
+
+👑 Top Talkers

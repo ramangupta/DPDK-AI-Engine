@@ -7,29 +7,20 @@
 #include <netinet/in.h>
 #include "sniffer_proto.h"
 
-struct talker {
-    char flow[128];     // "src_ip:src_port -> dst_ip:dst_port proto"
-    char proto[8];    // "TCP", "UDP", "ICMP", etc.
-    uint64_t pkts;
-    uint64_t bytes;
-};
-
-static struct talker table[MAX_TALKERS];
-static int used = 0;
+struct talker table[MAX_TALKERS];
+int used = 0;
 
 enum sort_mode talkers_sort_mode = SORT_BY_PKTS; // default
 
-static int cmp_pkts(const void *a, const void *b) {
+int cmp_pkts(const void *a, const void *b) {
     const struct talker *ta = a, *tb = b;
     return (tb->pkts > ta->pkts) - (tb->pkts < ta->pkts);
 }
 
-static int cmp_bytes(const void *a, const void *b) {
+int cmp_bytes(const void *a, const void *b) {
     const struct talker *ta = a, *tb = b;
     return (tb->bytes > ta->bytes) - (tb->bytes < ta->bytes);
 }
-
-#include "sniffer_proto.h"
 
 void talkers_update(const pkt_view *pv) {
     char flowbuf[256];

@@ -9,6 +9,7 @@
 #include "flows.h"   // where we’ll put flow_key_t, flow_update(), etc.
 #include "tsc.h"
 #include "utils.h"
+#include "sniffer_proto.h"
 
 flow_entry_t flow_table[FLOW_MAX];
 int flow_count;
@@ -34,17 +35,6 @@ void flow_key_build(flow_key_t *key,
     } else if (ip_version == 6) {
         inet_pton(AF_INET6, src_ip, key->src_ip);  // writes 16 bytes
         inet_pton(AF_INET6, dst_ip, key->dst_ip);
-    }
-}
-
-
-static const char* proto_name(uint8_t proto) {
-    switch (proto) {
-        case IPPROTO_TCP:  return "TCP";
-        case IPPROTO_UDP:  return "UDP";
-        case IPPROTO_ICMP: return "ICMP";
-        case IPPROTO_ICMPV6: return "ICMPv6";
-        default: return "?";
     }
 }
 
