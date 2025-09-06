@@ -13,12 +13,21 @@
 #include "utils.h"
 #include "tcp_reass.h"
 #include "parse_tunnel.h"
+#include "time.h"
+
+static inline double now_sec(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
 
 // Main packet processing loop
 int main(int argc, char **argv) 
 {
     pkt_view *pv = NULL;
     filter_pktview_t fpv;
+    uint64_t count = 0;
+    double t_start = now_sec();
 
     cli_parse(argc, argv);
     setup_signal_handlers();
@@ -28,19 +37,21 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (capture_init(g_filters.read_pcap ? g_filters.read_file : NULL) != 0) {
+    if (capture_init(argc, argv, g_filters.read_pcap ? g_filters.read_file : NULL) != 0) {
         fprintf(stderr, "Failed to init capture\n");
         return 1;
     }
 
 
     while ((pv = capture_next()) != NULL) {
+        count++;
         uint64_t now = now_tsc();
         if (extract_minimal_headers(&fpv, pv->data, pv->len) == 0) {
             if (filter_match(&fpv)) {
 
                 // Parse the packet (this may do frag/reassembly internally)
                 parse_packet(pv, now);
+
                 // Just for extreme debugging ...
                 // pkt_view_dump(pv);
                 if (pv->is_tunnel && pv->inner_pkt) {
@@ -71,12 +82,13 @@ int main(int argc, char **argv)
                 // Update stats/talkers
                 stats_poll(now);
 
-                pcap_writer_write(pv->data, pv->len);
-
-                // Optionally, write inner payload separately
-                if (pv->is_tunnel && pv->inner_pkt) {
-                    // You can adapt pcap_writer_write() to accept a label or new file
-                    pcap_writer_write((const uint8_t *)pv->inner_pkt, pv->inner_pkt->len);
+                if (g_filters.write_pcap) {
+                    pcap_writer_write(pv->data, pv->len);
+                   // Optionally, write inner payload separately
+                    if (pv->is_tunnel && pv->inner_pkt) {
+                        // You can adapt pcap_writer_write() to accept a label or new file
+                        pcap_writer_write((const uint8_t *)pv->inner_pkt->data, pv->inner_pkt->len);
+                    }
                 }
             }
         }
@@ -85,6 +97,13 @@ int main(int argc, char **argv)
         pv = NULL;
     }
 
+    double t_end = now_sec();
+    double duration = t_end - t_start;
+    double pps = count / duration;
+
+    printf("Processed %lu packets in %.3f sec -> %.2f PPS\n",
+           count, duration, pps);
+           
     // After processing all packets from the PCAP:
     frag_ipv4_flush_all();
     frag_ipv6_flush_all();

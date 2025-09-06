@@ -68,7 +68,8 @@ static int oid_equals(const uint8_t *oid, size_t oidlen, const uint8_t *pat, siz
 
 // copy ASN.1 string (many types possible) into buffer (null terminated). Accepts UTF8String(0x0C),
 // PrintableString(0x13), IA5String(0x16), BMPString(0x1E) (we'll treat BMP as bytes).
-static void asn1_copy_string(const uint8_t *p, size_t plen, char *out, size_t outlen) {
+static void __attribute__((unused))
+asn1_copy_string(const uint8_t *p, size_t plen, char *out, size_t outlen) {
     if (outlen == 0) return;
     out[0] = '\0';
     if (plen == 0) return;
@@ -299,8 +300,6 @@ void tls_parse_cert(const uint8_t *cert, size_t cert_len,
 
     // Now we are at the Certificate sequence contents: first is tbsCertificate (SEQUENCE)
     if (rem < 1 || *p != 0x30) return;
-    const uint8_t *tbs_ptr = p;
-    size_t tbs_rem = rem;
     // read tbsCertificate TLV
     const uint8_t *tbs_val;
     size_t tbs_len;

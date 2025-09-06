@@ -34,33 +34,49 @@ sources = [
 
 deps = []
 
-# Find json-c dependency
+# Dependencies
 jsonc_dep = dependency('json-c', required: true)
+pcap_dep  = dependency('pcap', required: true)
 
 if capture_backend == 'afp'
   sources += ['capture_afp.c', 'time_afp.c']
-  deps += [dependency('pcap')]
+  deps += [pcap_dep]
+
 elif capture_backend == 'pcap'
   sources += ['capture_pcap.c', 'time_pcap.c']
-  deps += [dependency('pcap')]
+  deps += [pcap_dep]
+
 elif capture_backend == 'dpdk'
   sources += ['capture_dpdk.c', 'time_dpdk.c']
   deps += [dependency('libdpdk')]
-  add_project_arguments('-DUSE_DPDK', language: 'c')
+  add_global_arguments('-DUSE_DPDK', language: 'c')
+
+  # Enable ASan only for debug builds
+  if get_option('buildtype') == 'debug'
+    add_project_arguments(
+      '-fsanitize=address',
+      '-fno-omit-frame-pointer',
+      '-g',
+      '-O0',
+      '-fno-stack-protector',
+      language: 'c'
+    )
+    add_project_link_arguments('-fsanitize=address', language: 'c')
+  endif
+
 else
   error('Unsupported capture backend: ' + capture_backend)
 endif
 
-# Add json-c to dependencies
-deps += [jsonc_dep]
+# Add json-c and pcap globally
+deps += [jsonc_dep, pcap_dep]
 
 executable('pkt-sniffer',
            sources,
            dependencies: deps,
            install: true)
 
-
-# Print build-time hint
+# Build-time hints
 message('==========================================================')
 message(' Selected capture backend: ' + capture_backend)
 if capture_backend == 'dpdk'

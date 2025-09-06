@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #ifdef USE_DPDK
@@ -31,37 +32,29 @@ pkt_view *capture_wrap(const uint8_t *data, size_t len) {
 
     pv->data    = data;
     pv->len     = len;
-    pv->kind    = PV_KIND_HEAP;
+    pv->kind    = PV_KIND_BORROWED;
     pv->backing = NULL;
     pv->inner_pkt = NULL;
+
     return pv;
 }
 
-#ifdef USE_DPDK
-// wrap DPDK mbuf
-pkt_view *capture_from_mbuf(struct rte_mbuf *mbuf) {
-    pkt_view *pv = malloc(sizeof(pkt_view));
-    if (!pv) return NULL;
-
-    pv->data    = rte_pktmbuf_mtod(mbuf, const uint8_t *);
-    pv->len     = rte_pktmbuf_pkt_len(mbuf);
-    pv->kind    = PV_KIND_MBUF;
-    pv->backing = mbuf;
-    return pv;
-}
-#endif
-
-// free correctly (recursive)
+// Free a pkt_view and its resources (recursive for inner_pkt)
 void capture_free(pkt_view *pv) {
     if (!pv) return;
 
-    // free inner packet first
+    DPDK_DEBUG_PRINT(
+        "capture_free: pv=%p kind=%d data=%p len=%u inner_pkt=%p\n",
+        (void*)pv, pv->kind, (void*)pv->data, (unsigned)pv->len,
+        (void*)pv->inner_pkt
+    );
+
+    // Recursively free any inner packet
     if (pv->inner_pkt) {
         capture_free(pv->inner_pkt);
         pv->inner_pkt = NULL;
     }
 
-    // free backing only if heap or mbuf
     switch (pv->kind) {
         case PV_KIND_HEAP:
             if (pv->backing) {
@@ -69,6 +62,7 @@ void capture_free(pkt_view *pv) {
                 pv->backing = NULL;
             }
             break;
+
         case PV_KIND_MBUF:
 #ifdef USE_DPDK
             if (pv->backing) {
@@ -76,16 +70,24 @@ void capture_free(pkt_view *pv) {
                 pv->backing = NULL;
             }
 #endif
+             // free the wrapper, but not pv->data (points into mbuf)
             break;
+
         case PV_KIND_STACK:
+            // do not free pv, it's stack-allocated
+            break;
+
+        case PV_KIND_BORROWED:
+            // borrowed buffer (recv/pcap) → do not free pv->data
+            break;
+
         default:
-            break; // nothing to free
+            // Unknown kind, just free pv as a fallback
+            break;
     }
 
-    // free pv itself only if heap or mbuf
-    if (pv->kind == PV_KIND_HEAP || pv->kind == PV_KIND_MBUF) {
-        free(pv);
-    }
+    free(pv);
 }
+
 
 

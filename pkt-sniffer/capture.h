@@ -1,14 +1,27 @@
 // capture.h
 #pragma once
 #include <stdint.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include "tunnel_types.h"
 
+#ifndef DPDK_DEBUG
+#define DPDK_DEBUG    0
+#endif
+
+#if DPDK_DEBUG
+#define DPDK_DEBUG_PRINT(fmt, ...) \
+    fprintf(stderr, "[DPDK][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define DPDK_DEBUG_PRINT(fmt, ...) do {} while (0)
+#endif
+
 typedef enum {
     PV_KIND_STACK = 0,  // borrowed (owned by backend, e.g., static recv buffer)
     PV_KIND_HEAP  = 1,  // heap we allocated via capture_alloc()
-    PV_KIND_MBUF  = 2   // DPDK mbuf (owned by backend)
+    PV_KIND_MBUF  = 2,   // DPDK mbuf (owned by backend)
+    PV_KIND_BORROWED = 3 // Borrowed such as in the case of capture_wrap
 } pv_kind_t;
 
 typedef struct pkt_view {
@@ -35,7 +48,8 @@ typedef struct pkt_view {
 } pkt_view;
 
 // Backend lifecycle
-int  capture_init(const char *pcap_file);
+int capture_init(int argc, char **argv, const char *file);
+
 pkt_view *capture_next(void);
 void capture_release(pkt_view *pv);
 void capture_close(void);

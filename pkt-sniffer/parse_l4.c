@@ -289,6 +289,11 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
             parse_dns_udp(udp_payload, paylen, /*is_response=*/(sport == 53), now);
         }
         
+        printf("      UDP %u → %u len=%u payload=%u\n",
+            rte_be_to_cpu_16(uh->src_port),
+            rte_be_to_cpu_16(uh->dst_port),
+            udplen, paylen);
+
         if ((sport == 67 && dport == 68) || (sport == 68 && dport == 67)) {
             pkt_view dhcpview = {
                 .data = (uint8_t *)uh + sizeof(*uh),
@@ -298,12 +303,6 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
             };
             handle_dhcp(&dhcpview);
         }
-
-        printf("      UDP %u → %u len=%u payload=%u\n",
-            rte_be_to_cpu_16(uh->src_port),
-            rte_be_to_cpu_16(uh->dst_port),
-            udplen, paylen);
-
     } else if (pv_slice->l4_proto == IPPROTO_TCP) {
         stats_update(PROTO_TCP, pv_slice->len);
         if (pv_slice->len < sizeof(struct rte_tcp_hdr)) { printf("      TCP <truncated>\n"); return; }

@@ -15,7 +15,7 @@ static int sock_fd = -1;
 // a reusable receive buffer; parse happens before next recv, so it's safe
 static uint8_t rx_buf[2048];
 
-int capture_init(const char *file) {
+int capture_init(int argc, char **argv, const char *file) {
     sock_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (sock_fd < 0) {
         perror("socket(AF_PACKET)");
