@@ -7,7 +7,7 @@
 void handle_arp(pkt_view *pv_full, const pkt_view *pv_slice)
 {
     if (pv_slice->len < sizeof(struct rte_arp_hdr)) {
-        printf("      ARP <truncated>\n");
+        DEBUG_LOG(DBG_ARP, "      ARP <truncated>\n");
         return;
     }
 
@@ -56,15 +56,15 @@ void handle_arp(pkt_view *pv_full, const pkt_view *pv_slice)
 
     switch (ntohs(arp->arp_opcode)) {
     case RTE_ARP_OP_REQUEST:
-        printf("      ARP request: who has %s? tell %s (%s)\n", tip, sip, mac);
+        PARSER_LOG_LAYER("ARP", COLOR_ARP, "      ARP request: who has %s? tell %s (%s)\n", tip, sip, mac);
         stats_record_arp(tip, NULL);   // record request
         break;
     case RTE_ARP_OP_REPLY:
-        printf("      ARP reply: %s is at %s\n", sip, mac);
+        PARSER_LOG_LAYER("ARP", COLOR_ARP, "      ARP reply: %s is at %s\n", sip, mac);
         stats_record_arp(sip, mac);    // record reply
         break;
     default:
-        printf("      ARP opcode=%u (not supported)\n", ntohs(arp->arp_opcode));
+        PARSER_LOG_LAYER("ARP", COLOR_ARP, "      ARP opcode=%u (not supported)\n", ntohs(arp->arp_opcode));
         break;
     }
 }

@@ -21,7 +21,7 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
     if (!pv_full) return;
 
     if (!pv_slice) {
-        printf("      [WARN] handle_ipv4: NULL slice\n");
+        DEBUG_LOG(DBG_IP, "      [WARN] handle_ipv4: NULL slice\n");
         return;
     }
 
@@ -29,13 +29,13 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
     uint16_t rem = pv_slice->len;
 
     if (rem < sizeof(struct rte_ipv4_hdr)) {
-        printf("      IPv4 <truncated>\n");
+        DEBUG_LOG(DBG_IP, "      IPv4 <truncated>\n");
         return;
     }
 
     uint8_t ihl = (ip4->version_ihl & 0x0F) * 4;
     if (ihl < sizeof(struct rte_ipv4_hdr) || ihl > rem) {
-        printf("      IPv4 <bad IHL>\n");
+        DEBUG_LOG(DBG_IP, "      IPv4 <bad IHL>\n");
         return;
     }
 
@@ -57,8 +57,9 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
     if (more_frags || offset > 0) {
         full = frag_reass_ipv4(ip4, pv_slice, now);  // returns full pkt_view if done
         if (!full) {
-            printf("IPv4 fragment buffered (id=%u)\n",
-                    rte_be_to_cpu_16(ip4->packet_id));
+            PARSER_LOG_LAYER("IP-FRAG", COLOR_IP_FRAG, 
+                            "IPv4 fragment buffered (id=%u)",
+                            rte_be_to_cpu_16(ip4->packet_id));
             // done, but still need to free original fragment
             // capture_free(pv);
             stats_record_frag(ip4->src_addr, ip4->dst_addr, 
@@ -79,17 +80,16 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 
         // >>> IMPORTANT: recompute tot from the reassembled header
         tot = rte_be_to_cpu_16(ip4->total_length);
-        printf("IPv4 reassembled (id=%u len=%u)\n",
-               rte_be_to_cpu_16(ip4->packet_id), pv_slice->len);
+        PARSER_LOG_LAYER("IP-FRAG", COLOR_IP_FRAG,
+                         "IPv4 reassembled (id=%u len=%u)\n",
+                         rte_be_to_cpu_16(ip4->packet_id), pv_slice->len);
     }
 
     // --- Print header ---
-    printf("      IPv4 ");
-    print_ipv4(ip4->src_addr);
-    printf(" → ");
-    print_ipv4(ip4->dst_addr);
-    printf(" proto=%u ihl=%u tot=%u ttl=%u\n",
-        ip4->next_proto_id, ihl, tot, ip4->time_to_live);
+    PARSER_LOG_LAYER("IP", COLOR_IP, "      IPv4 ");
+    print_ip_flow(ip4->src_addr, ip4->dst_addr);
+    PARSER_LOG_LAYER("IP", COLOR_IP, " proto=%u ihl=%u tot=%u ttl=%u\n",
+                     ip4->next_proto_id, ihl, tot, ip4->time_to_live);
 
     // --- Fill pv_full metadata ---
     snprintf(pv_full->src_ip, sizeof(pv_full->src_ip), "%u.%u.%u.%u",
@@ -120,7 +120,7 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
         pv_full->tunnel = pv_payload.tunnel;
         pv_full->inner_pkt = pv_payload.inner_pkt;
 
-        printf("      IPv4 Tunnel detected: %s\n",
+        PARSER_LOG_LAYER("Tunnel", COLOR_TUNNEL, "      IPv4 Tunnel detected: %s",
                (pv_full->tunnel.type == TUNNEL_GRE)    ? "GRE" :
                (pv_full->tunnel.type == TUNNEL_VXLAN)  ? "VXLAN" :
                (pv_full->tunnel.type == TUNNEL_GENEVE) ? "GENEVE" : "OTHER");
@@ -139,11 +139,11 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
                     } else if (pv_full->tunnel.inner_proto == 0x86DD) {
                         handle_ipv6(pv_full, pv_payload.inner_pkt, now);
                     } else {
-                        printf("      GRE unsupported inner proto=0x%04x\n", pv_full->tunnel.inner_proto);
+                        DEBUG_LOG(DBG_IP,"      GRE unsupported inner proto=0x%04x\n", pv_full->tunnel.inner_proto);
                         // Do not attempt parse_l4() on outer GRE header — GRE is not L4 for us.
                     }
                 } else {
-                    printf("      [WARN] GRE inner packet missing\n");
+                    DEBUG_LOG(DBG_IP,"      [WARN] GRE inner packet missing\n");
                 }
                 break;
             case TUNNEL_VXLAN:
@@ -152,11 +152,11 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
                     // inner_pkt must point to an Ethernet frame
                     parse_packet(pv_payload.inner_pkt, now);
                 else
-                    printf("      [WARN] VXLAN/GENEVE inner packet missing\n");
+                    DEBUG_LOG(DBG_IP,"      [WARN] VXLAN/GENEVE inner packet missing\n");
                 break;
             default:
                 // Unknown tunnel type — log and fall back to parsing payload as L4 if sensible
-                printf("      Unknown tunnel type=%d\n", pv_full->tunnel.type);
+                DEBUG_LOG(DBG_IP,"      Unknown tunnel type=%d\n", pv_full->tunnel.type);
                 if (pv_payload.inner_pkt) 
                     parse_l4(pv_full, pv_payload.inner_pkt, now);
                 break;

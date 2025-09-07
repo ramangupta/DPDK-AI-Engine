@@ -6,20 +6,6 @@
 #include "capture.h"
 
 // ------------------------------
-// Debug toggle
-// ------------------------------
-#ifndef TUNNEL_DEBUG
-#define TUNNEL_DEBUG 1
-#endif
-
-#if TUNNEL_DEBUG
-#define DEBUG_PRINT(fmt, ...) \
-    fprintf(stderr, "[TUNNEL][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
-#else
-#define DEBUG_PRINT(fmt, ...) do {} while (0)
-#endif
-
-// ------------------------------
 // GRE Header Definition
 // ------------------------------
 struct rte_gre_hdr {

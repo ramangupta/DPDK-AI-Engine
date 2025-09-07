@@ -23,13 +23,13 @@
 #include "stats.h"
 
 static void print_ip(const char *label, const uint8_t *ip) {
-    printf("        %s %u.%u.%u.%u\n", label, ip[0], ip[1], ip[2], ip[3]);
+    PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        %s %u.%u.%u.%u\n", label, ip[0], ip[1], ip[2], ip[3]);
 }
 
 static void print_ip_list(const char *label, const uint8_t *v, uint8_t len) {
-    printf("        %s ", label);
+    PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        %s ", label);
     for (int i=0; i<len; i+=4) {
-        printf("%u.%u.%u.%u", v[i], v[i+1], v[i+2], v[i+3]);
+        PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "%u.%u.%u.%u", v[i], v[i+1], v[i+2], v[i+3]);
         if (i+4 < len) printf(", ");
     }
     printf("\n");
@@ -73,24 +73,24 @@ static inline void parse_dhcp_options(const uint8_t *opt, size_t len) {
             break;
         case 51: { // Lease time
             uint32_t lease = ntohl(*(uint32_t*)opt);
-            printf("        lease_time %u s\n", lease);
+            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        lease_time %u s\n", lease);
             break;
         }
         case 58: { // Renewal time (T1)
             uint32_t t1 = ntohl(*(uint32_t*)opt);
-            printf("        renewal_time %u s\n", t1);
+            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        renewal_time %u s\n", t1);
             break;
         }
         case 59: { // Rebinding time (T2)
             uint32_t t2 = ntohl(*(uint32_t*)opt);
-            printf("        rebinding_time %u s\n", t2);
+            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        rebinding_time %u s\n", t2);
             break;
         }
         case 54: // Server identifier
             print_ip("server_id", opt);
             break;
         case 12: // Hostname
-            printf("        hostname %.*s\n", optlen, (const char*)opt);
+            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        hostname %.*s\n", optlen, (const char*)opt);
             break;
         default:
             // Uncomment if you want to see all options
@@ -103,7 +103,7 @@ static inline void parse_dhcp_options(const uint8_t *opt, size_t len) {
 
 void handle_dhcp(pkt_view *pv) {
     if (pv->len < sizeof(struct bootp_hdr)) {
-        printf("    DHCP <truncated>\n");
+        DEBUG_LOG(DBG_DHCP, "    DHCP <truncated>");
         return;
     }
 
@@ -112,13 +112,13 @@ void handle_dhcp(pkt_view *pv) {
 
     const char *msgtype = "UNKNOWN";   // <-- declare here at top level
 
-    printf("    DHCP xid=0x%x op=%u (%s)\n",
+    PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "    DHCP xid=0x%x op=%u (%s)",
            ntohl(bp->xid),
            bp->op,
            (bp->op == 1) ? "REQUEST" : (bp->op == 2 ? "REPLY" : "UNKNOWN"));
 
     if (bp->yiaddr) {
-        printf("        yiaddr %s\n", inet_ntoa(*(struct in_addr*)&bp->yiaddr));
+        PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "        yiaddr %s", inet_ntoa(*(struct in_addr*)&bp->yiaddr));
     }
 
     // DHCP options
@@ -150,18 +150,18 @@ void handle_dhcp(pkt_view *pv) {
                                 case 8: msgtype = "INFORM";   break;
                             }
                         }
-                        printf("      type=%s\n", msgtype);
+                        PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      type=%s", msgtype);
                         break;
 
                     case 50: // Requested IP
                         if (len == 4) {
-                            printf("      requested_ip=%s\n",
+                            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      requested_ip=%s",
                                    inet_ntoa(*(struct in_addr*)opt));
                         }
                         break;
                     case 54: // Server Identifier
                         if (len == 4) {
-                            printf("      server_id=%s\n",
+                            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      server_id=%s",
                                    inet_ntoa(*(struct in_addr*)opt));
                         }
                         break;
@@ -169,19 +169,19 @@ void handle_dhcp(pkt_view *pv) {
                         if (len == 4) {
                             uint32_t t;
                             memcpy(&t, opt, 4);
-                            printf("      lease_time=%u sec\n", ntohl(t));
+                            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      lease_time=%u sec", ntohl(t));
                         }
                         break;
                     case 1: // Subnet Mask
                         if (len == 4) {
-                            printf("      subnet_mask=%s\n",
+                            PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      subnet_mask=%s",
                                    inet_ntoa(*(struct in_addr*)opt));
                         }
                         break;
                     case 3: // Router
                         if (len % 4 == 0) {
                             for (int i = 0; i < len; i += 4) {
-                                printf("      router=%s\n",
+                                PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      router=%s",
                                        inet_ntoa(*(struct in_addr*)(opt + i)));
                             }
                         }
@@ -189,7 +189,7 @@ void handle_dhcp(pkt_view *pv) {
                     case 6: // DNS servers
                         if (len % 4 == 0) {
                             for (int i = 0; i < len; i += 4) {
-                                printf("      dns=%s\n",
+                                PARSER_LOG_LAYER("DHCP", COLOR_DHCP, "      dns=%s",
                                        inet_ntoa(*(struct in_addr*)(opt + i)));
                             }
                         }

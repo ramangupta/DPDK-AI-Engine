@@ -30,6 +30,7 @@ sources = [
   'parse_tunnel.c',
   'parse_tls_cert.c',
   'stats_json.c',
+  'debug.c',
 ]
 
 deps = []

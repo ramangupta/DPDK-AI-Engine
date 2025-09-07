@@ -19,18 +19,16 @@ static void parse_ethernet(const struct rte_ether_hdr *eth,
                            uint16_t pktlen,
                            uint16_t etype)
 {
-    printf("[len=%" PRIu16 "] ETH ", pktlen);
-    print_mac(eth->src_addr.addr_bytes);
-    printf(" → ");
-    print_mac(eth->dst_addr.addr_bytes);
-    printf(" type=0x%04x\n", etype);
+    PARSER_LOG_LAYER("ETH", COLOR_ETH, "[len=%" PRIu16 "]", pktlen);
+    print_mac_flow(eth->src_addr.addr_bytes, eth->dst_addr.addr_bytes);
+    PARSER_LOG_LAYER("ETH", COLOR_ETH, " type=0x%04x\n", etype);
 }
 
 void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
 {
     if (!pv_full || pv_full->len < sizeof(struct rte_ether_hdr)) {
         if (pv_full) {
-            printf("[len=%" PRIu16 "] <truncated ethernet>\n", pv_full->len);
+            DEBUG_LOG(DBG_ETH, "[len=%" PRIu16 "] <truncated ethernet>\n", pv_full->len);
         }
         return;
     }
@@ -49,7 +47,7 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
     if (etype == RTE_ETHER_TYPE_IPV4) {
         stats_update(PROTO_IPV4, pktlen);
         if (rem < sizeof(struct rte_ipv4_hdr)) {
-            printf("      IPv4 <truncated>\n");
+            DEBUG_LOG(DBG_ETH, "      IPv4 <truncated>\n");
             return;
         }
         pkt_view ipview = {
@@ -64,7 +62,7 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
     } else if (etype == RTE_ETHER_TYPE_IPV6) {
         stats_update(PROTO_IPV6, pktlen);
         if (rem < sizeof(struct rte_ipv6_hdr)) {
-            printf("      IPv6 <truncated>\n");
+            DEBUG_LOG(DBG_ETH, "      IPv6 <truncated>\n");
             return;
         }
         pkt_view ipview = {
@@ -87,12 +85,12 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
             stats_update(PROTO_ARP, arpview.len);
             handle_arp(pv_full, &arpview);
         } else {
-            printf("ARP <truncated>\n");
+            DEBUG_LOG(DBG_ETH, "ARP <truncated>\n");
         }
     } else if (etype == RTE_ETHER_TYPE_VLAN) {
-        printf("      VLAN (not decoded in this sample)\n");
+        DEBUG_LOG(DBG_ETH, "      VLAN (not decoded in this sample)\n");
     } else {
-        printf("      EtherType 0x%04x not decoded\n", etype);
+        DEBUG_LOG(DBG_ETH, "      EtherType 0x%04x not decoded\n", etype);
     }
     // talkers_report();
 }

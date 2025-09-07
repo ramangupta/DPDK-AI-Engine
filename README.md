@@ -13,8 +13,26 @@ Think of it as **tcpdump on steroids** — flow-aware, protocol-smart, and ready
 
 ## 🚀 Demo
 
-Here’s a quick look at the dashboard in action:
-![Live Demo](docs/dashboard.gif)
+Here’s a quick look at the dashboard and live parser logs in action:
+
+<table>
+  <tr>
+    <td align="center"><b>📊 Dashboard (Top)</b><br>
+      <img src="docs/dashboard.gif" width="400">
+    </td>
+    <td align="center"><b>📈 Dashboard (Middle)</b><br>
+      <img src="docs/dashboard_middle.gif" width="400">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><b>📉 Dashboard (Bottom)</b><br>
+      <img src="docs/dashboard_bottom.gif" width="400">
+    </td>
+    <td align="center"><b>📝 Live Parser Logs</b><br>
+      <img src="docs/parser_logs.gif" width="400">
+    </td>
+  </tr>
+</table>
 
 ---
 

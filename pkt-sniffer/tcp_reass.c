@@ -30,17 +30,6 @@ typedef pthread_mutex_t flow_lock_t;
 #define flow_lock_destroy(L)  pthread_mutex_destroy((L))
 #endif
 
-// Debug toggle
-#ifndef TCP_DEBUG
-#define TCP_DEBUG 0
-#endif
-
-#if TCP_DEBUG
-#define DEBUG_PRINT(fmt, ...) \
-    fprintf(stderr, "[TCP_REASS][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
-#else
-#define DEBUG_PRINT(fmt, ...) do {} while (0)
-#endif
 
 /* Config knobs (override at compile time if needed) */
 #ifndef TCP_REASS_FLOW_TIMEOUT_SEC
@@ -142,11 +131,11 @@ static tcp_seg_t *seg_new(const uint8_t *data, uint32_t len, uint32_t seq, time_
 }
 
 // Insert segment in sorted order, trimming overlaps
-static void insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
+static int insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
     if (!*head) { 
         *head = s; 
-        DEBUG_PRINT("Inserted first segment: seq=%u len=%u", s->seq, s->len);
-        return; 
+        DEBUG_LOG(DBG_TCP_REASS,"Inserted first segment: seq=%u len=%u", s->seq, s->len);
+        return 1; 
     }
 
     tcp_seg_t **cur = head;
@@ -161,10 +150,10 @@ static void insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
         if (prev_end > s->seq) {
             uint32_t ov = prev_end - s->seq;
             if (ov >= s->len) {
-                DEBUG_PRINT("Dropped fully duplicate segment at seq=%u len=%u", s->seq, s->len);
-                free(s->data); free(s); return;
+                DEBUG_LOG(DBG_TCP_REASS,"Dropped fully duplicate segment at seq=%u len=%u", s->seq, s->len);
+                free(s->data); free(s); return 0;
             }
-            DEBUG_PRINT("Trimmed %u bytes overlap with previous (seq=%u)", ov, s->seq);
+            DEBUG_LOG(DBG_TCP_REASS,"Trimmed %u bytes overlap with previous (seq=%u)", ov, s->seq);
             memmove(s->data, s->data + ov, s->len - ov);
             s->seq += ov;
             s->len -= ov;
@@ -177,10 +166,10 @@ static void insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
         if (s->seq + s->len > cur_start) {
             uint32_t ov = (s->seq + s->len) - cur_start;
             if (ov >= s->len) {
-                DEBUG_PRINT("Dropped segment fully overlapped by next at seq=%u len=%u", s->seq, s->len);
-                free(s->data); free(s); return;
+                DEBUG_LOG(DBG_TCP_REASS,"Dropped segment fully overlapped by next at seq=%u len=%u", s->seq, s->len);
+                free(s->data); free(s); return 0;  // --> REASON FOR CRASH
             }
-            DEBUG_PRINT("Trimmed %u bytes overlap with next (seq=%u)", ov, s->seq);
+            DEBUG_LOG(DBG_TCP_REASS,"Trimmed %u bytes overlap with next (seq=%u)", ov, s->seq);
             s->len -= ov;
         }
     }
@@ -190,16 +179,17 @@ static void insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
 
     // update per-flow buffer accounting (caller's context must provide which queue)
 
-    DEBUG_PRINT("inserted seg seq=%u len=%u", s->seq, s->len);
+    DEBUG_LOG(DBG_TCP_REASS,"inserted seg seq=%u len=%u", s->seq, s->len);
     // NOTE: we cannot access flow directly here, so update counters from caller
 
-    DEBUG_PRINT("Queue after insert:");
+    DEBUG_LOG(DBG_TCP_REASS,"Queue after insert:");
     tcp_seg_t *tmp = *head;
     while (tmp) {
-        DEBUG_PRINT("   seg seq=%u len=%u", tmp->seq, tmp->len);
+        DEBUG_LOG(DBG_TCP_REASS,"   seg seq=%u len=%u", tmp->seq, tmp->len);
         tmp = tmp->next;
     }
 
+    return 1;
 }
 
 // Try to deliver in-order segments to callback
@@ -212,7 +202,7 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
         // Stop if the next segment starts after what we expect → gap
         if (seq_gt(h->seq, *next_expected)) {
             /* Waiting for missing bytes */
-            DEBUG_PRINT("Gap detected: seg_seq=%u next_expected=%u dir=%d",
+            DEBUG_LOG(DBG_TCP_REASS,"Gap detected: seg_seq=%u next_expected=%u dir=%d",
                         h->seq, *next_expected, dir);
             stats_tcp_out_of_order();
             break;
@@ -224,7 +214,7 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
             off = *next_expected - h->seq;
             if (off >= h->len) {
                 // Entire segment already delivered → drop
-                DEBUG_PRINT("Dropping fully duplicate seg: seq=%u len=%u dir=%d",
+                DEBUG_LOG(DBG_TCP_REASS,"Dropping fully duplicate seg: seq=%u len=%u dir=%d",
                             h->seq, h->len, dir);
                 stats_tcp_duplicate();
                 *head = h->next;
@@ -233,7 +223,7 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
                 continue;
             }
             stats_tcp_overlap();
-            DEBUG_PRINT("Partial overlap: seg_seq=%u off=%u adjusted_len=%u dir=%d",
+            DEBUG_LOG(DBG_TCP_REASS,"Partial overlap: seg_seq=%u off=%u adjusted_len=%u dir=%d",
                         h->seq, off, h->len - off, dir);
         }
 
@@ -242,14 +232,14 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
 
         // Deliver payload if non-empty
         if (deliver_len && cb) {
-            DEBUG_PRINT("Delivering %u bytes dir=%d seq=%u (expected=%u)",
+            DEBUG_LOG(DBG_TCP_REASS,"Delivering %u bytes dir=%d seq=%u (expected=%u)",
                         deliver_len, dir, h->seq + off, *next_expected);
             cb(f, dir, deliver_ptr, deliver_len, f->last_seen, user_ctx);
         }
 
         // Advance expected sequence number
         *next_expected = h->seq + h->len;
-        DEBUG_PRINT("Updated next_expected=%u dir=%d", *next_expected, dir);
+        DEBUG_LOG(DBG_TCP_REASS,"Updated next_expected=%u dir=%d", *next_expected, dir);
 
         // adjust per-flow buffer accounting
         if (dir == 0) {
@@ -317,7 +307,7 @@ static tcp_flow_t *flow_create(const char *src, const char *dst,
     uint32_t h = flow_hash(src, dst, sport, dport);
     f->next = flow_table[h];
     flow_table[h] = f;
-    DEBUG_PRINT("Created new flow %s:%u -> %s:%u", src, sport, dst, dport);
+    DEBUG_LOG(DBG_TCP_REASS,"Created new flow %s:%u -> %s:%u", src, sport, dst, dport);
     return f;
 }
 
@@ -355,7 +345,7 @@ int tcp_reass_init(void) {
         flow_lock_init(&bucket_locks[i]);
     }
 
-    DEBUG_PRINT("TCP reassembly initialized");
+    DEBUG_LOG(DBG_TCP_REASS,"TCP reassembly initialized");
     return 0;
 }
 
@@ -375,7 +365,7 @@ void tcp_reass_fini(void) {
         flow_lock_release(&bucket_locks[i]);
         flow_lock_destroy(&bucket_locks[i]);
     }
-    DEBUG_PRINT("TCP reassembly finalized, all flows freed");
+    DEBUG_LOG(DBG_TCP_REASS,"TCP reassembly finalized, all flows freed");
 }
 
 // --- Main entry ---
@@ -386,7 +376,7 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
                                tcp_reass_deliver_cb deliver_cb, void *user_ctx)
 {
     // Log every segment arrival
-    DEBUG_PRINT("Segment %s:%u → %s:%u | seq=%u | len=%u | flags=0x%x",
+    DEBUG_LOG(DBG_TCP_REASS,"Segment %s:%u → %s:%u | seq=%u | len=%u | flags=0x%x",
                 src_ip, src_port, dst_ip, dst_port, seq, payload_len, flags);
 
     stats_tcp_segment(payload_len);
@@ -407,7 +397,7 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     if (!f) {
         f = flow_create(src_ip, dst_ip, src_port, dst_port, ts);
         created = 1;
-        DEBUG_PRINT("Flow created for %s:%u ↔ %s:%u", src_ip, src_port, dst_ip, dst_port);
+        DEBUG_LOG(DBG_TCP_REASS,"Flow created for %s:%u ↔ %s:%u", src_ip, src_port, dst_ip, dst_port);
     } else {
         /* get a usage reference while we will use it outside bucket lock */
         flow_get_ref(f);
@@ -429,7 +419,7 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     // Direction: dir=0 means src→dst matches flow's tuple, otherwise 1
     int dir = (strcmp(f->src_ip, src_ip) == 0 && strcmp(f->dst_ip, dst_ip) == 0 &&
                f->src_port == src_port && f->dst_port == dst_port) ? 0 : 1;
-    DEBUG_PRINT("Flow %p dir=%d", (void*)f, dir);
+    DEBUG_LOG(DBG_TCP_REASS,"Flow %p dir=%d", (void*)f, dir);
 
     /* 
      * ====== FLOW-LEVEL CRITICAL SECTION START ======
@@ -442,13 +432,13 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     if (created && (flags & 0x02)) {             // SYN
         if (dir == 0) f->next_s2d = seq + 1;     // ISN consumes 1
         else          f->next_d2s = seq + 1;
-        DEBUG_PRINT("New flow with SYN: dir=%d ISN=%u", dir, seq);
+        DEBUG_LOG(DBG_TCP_REASS,"New flow with SYN: dir=%d ISN=%u", dir, seq);
     } else if (created && payload_len > 0) {
         // Flow created mid-stream (no SYN). To avoid losing the first payload,
         // initialize expected to this segment's SEQ (not seq+len).
         if (dir == 0) f->next_s2d = seq;
         else          f->next_d2s = seq;
-        DEBUG_PRINT("New flow mid-stream: dir=%d start_seq=%u", dir, seq);
+        DEBUG_LOG(DBG_TCP_REASS,"New flow mid-stream: dir=%d start_seq=%u", dir, seq);
     }
 
     // update syn/fin markers
@@ -458,17 +448,17 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     if (flags & 0x01) {
         f->seen_fin = 1;
         if (f->close_mark_ts == 0) f->close_mark_ts = ts;
-        DEBUG_PRINT("FIN seen, mark close_ts=%ld", (long)f->close_mark_ts);
+        DEBUG_LOG(DBG_TCP_REASS,"FIN seen, mark close_ts=%ld", (long)f->close_mark_ts);
     }
 
     if (flags & 0x04) { // RST
         f->seen_fin = 1;
         if (f->close_mark_ts == 0) f->close_mark_ts = ts;
-        DEBUG_PRINT("RST seen, mark close_ts=%ld", (long)f->close_mark_ts);
+        DEBUG_LOG(DBG_TCP_REASS,"RST seen, mark close_ts=%ld", (long)f->close_mark_ts);
     }
 
     if (payload_len == 0) {
-        DEBUG_PRINT("Control packet (no payload) return");
+        DEBUG_LOG(DBG_TCP_REASS,"Control packet (no payload) return");
         goto out_unlock;
     }
 
@@ -491,16 +481,17 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     if (dir == 0) {
         if (f->next_s2d == 0) {
             f->next_s2d = seq;
-            DEBUG_PRINT("Init next_s2d=%u from first payload (dir=0)", f->next_s2d);
+            DEBUG_LOG(DBG_TCP_REASS,"Init next_s2d=%u from first payload (dir=0)", f->next_s2d);
         }
         // s2d direction
-        insert_seg_sorted(&f->s2d_head, seg);
+        if (insert_seg_sorted(&f->s2d_head, seg)) {
+            /* Update accounting using the final seg->len (insert may have trimmed it) */
+            f->s2d_bytes_buf += seg->len;
+        }
 
-        /* Update accounting using the final seg->len (insert may have trimmed it) */
-        f->s2d_bytes_buf += seg->len;
         if (f->s2d_bytes_buf > TCP_PER_FLOW_CAP_BYTES) {
             // drop the inserted seg to protect memory
-            DEBUG_PRINT("Per-flow s2d cap exceeded (%u bytes) — dropping seg seq=%u len=%u",
+            DEBUG_LOG(DBG_TCP_REASS,"Per-flow s2d cap exceeded (%u bytes) — dropping seg seq=%u len=%u",
                         f->s2d_bytes_buf, seg->seq, seg->len);
             // remove the seg we just inserted (it will be at correct position; easiest: traverse and remove first match)
             // simple remove of the exact pointer `seg`
@@ -521,17 +512,18 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
     } else {
         if (f->next_d2s == 0) {
             f->next_d2s = seq;
-            DEBUG_PRINT("Init next_d2s=%u from first payload (dir=1)", f->next_d2s);
+            DEBUG_LOG(DBG_TCP_REASS,"Init next_d2s=%u from first payload (dir=1)", f->next_d2s);
         }
-        DEBUG_PRINT("SEG dir=%d seq=%u len=%u expected=%u",
+        DEBUG_LOG(DBG_TCP_REASS,"SEG dir=%d seq=%u len=%u expected=%u",
             dir, seq, payload_len,
             (dir==0 ? f->next_s2d : f->next_d2s));
 
         // d2s direction
-        insert_seg_sorted(&f->d2s_head, seg);
-        f->d2s_bytes_buf += seg->len;
+        if (insert_seg_sorted(&f->d2s_head, seg)) {
+            f->d2s_bytes_buf += seg->len;
+        }
         if (f->d2s_bytes_buf > TCP_PER_FLOW_CAP_BYTES) {
-            DEBUG_PRINT("Per-flow d2s cap exceeded (%u bytes) — dropping seg seq=%u len=%u",
+            DEBUG_LOG(DBG_TCP_REASS,"Per-flow d2s cap exceeded (%u bytes) — dropping seg seq=%u len=%u",
                         f->d2s_bytes_buf, seg->seq, seg->len);
             tcp_seg_t **pp = &f->d2s_head;
             while (*pp && *pp != seg) pp = &(*pp)->next;
@@ -565,7 +557,7 @@ void tcp_reass_periodic_maintenance(time_t now_sec) {
             int removed = 0;
 
             if (f->close_mark_ts != 0 && (now_sec - f->close_mark_ts) > TCP_FIN_LINGER_SEC) {
-                DEBUG_PRINT("Expiring closed flow %s:%u <-> %s:%u", f->src_ip, f->src_port, f->dst_ip, f->dst_port);
+                DEBUG_LOG(DBG_TCP_REASS,"Expiring closed flow %s:%u <-> %s:%u", f->src_ip, f->src_port, f->dst_ip, f->dst_port);
                 *pf = f->next;
                 /* mark for free; free only if no active refs */
                 f->marked_free = 1;
@@ -574,7 +566,7 @@ void tcp_reass_periodic_maintenance(time_t now_sec) {
                 }
                 removed = 1;
             } else if ((now_sec - f->last_seen) > TCP_REASS_FLOW_TIMEOUT_SEC) {
-                DEBUG_PRINT("Expiring idle flow %s:%u <-> %s:%u (last_seen=%ld now=%ld)",
+                DEBUG_LOG(DBG_TCP_REASS,"Expiring idle flow %s:%u <-> %s:%u (last_seen=%ld now=%ld)",
                             f->src_ip, f->src_port, f->dst_ip, f->dst_port,
                             (long)f->last_seen, (long)now_sec);
                 *pf = f->next;

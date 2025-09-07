@@ -9,16 +9,6 @@
 #include "utils.h"
 #include "stats.h"
 
-#ifndef HTTP_DEBUG
-#define HTTP_DEBUG 0
-#endif
-
-#if HTTP_DEBUG
-#define DEBUG_PRINT(fmt, ...) fprintf(stderr, "[HTTP] " fmt "\n", ##__VA_ARGS__)
-#else
-#define DEBUG_PRINT(fmt, ...) 
-#endif
-
 // --- Helper: trim leading/trailing whitespace ---
 static void trim(char *s) {
     // Trim leading
@@ -42,10 +32,6 @@ void parse_http(const pkt_view *pv) {
     const char *end = memchr(data, '\n', pv->len);
     if (!end) return;
 
-#if HTTP_DEBUG
-    fwrite(pv->data, 1, pv->len, stdout);
-    printf("\n----\n");
-#endif
     size_t line_len = end - data;
     if (line_len > 200) line_len = 200;
 
@@ -60,9 +46,9 @@ void parse_http(const pkt_view *pv) {
     int code = 0;
     char reason[64] = {0};
 
-#if HTTP_DEBUG
-    DEBUG_PRINT("[HTTP RAW] %.*s\n----\n", (int)pv->len, (const char*)pv->data);
-#endif 
+
+    DEBUG_LOG(DBG_HTTP, "%.*s\n----\n", (int)pv->len, (const char*)pv->data);
+
     
     // --- Detect request line ---
     if (!strncasecmp(line, "GET ", 4) || !strncasecmp(line, "POST ", 5) ||
@@ -71,7 +57,7 @@ void parse_http(const pkt_view *pv) {
         
         method_str = strtok(line, " ");
         uri_str = strtok(NULL, " ");
-        printf("      HTTP Request: %s %s\n", method_str, uri_str ? uri_str : "");
+        PARSER_LOG_LAYER("HTTP", COLOR_HTTP, "      HTTP Request: %s %s\n", method_str, uri_str ? uri_str : "");
 
     } else if (!strncmp(line, "HTTP/", 5)) {
         // Response
@@ -80,7 +66,7 @@ void parse_http(const pkt_view *pv) {
             size_t max_reason = sizeof(statusbuf) - 8;  // leave space for code + space + null
             if (max_reason > sizeof(reason)-1) max_reason = sizeof(reason)-1;
             snprintf(statusbuf, sizeof(statusbuf), "%d %.*s", code, (int)max_reason, reason);
-            printf("      HTTP Response: %s\n", statusbuf);
+            PARSER_LOG_LAYER("HTTP", COLOR_HTTP, "      HTTP Response: %s\n", statusbuf);
         } else {
             statusbuf[0] = '\0';
         }

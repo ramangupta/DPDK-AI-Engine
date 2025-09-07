@@ -93,7 +93,7 @@ static void parse_extensions(const uint8_t *exts, size_t exts_len, struct tls_me
                 if (name_type == 0 && name_len > 0 && name_len < (int)sizeof(meta->sni)) {
                     memcpy(meta->sni, p, name_len);
                     meta->sni[name_len] = '\0';
-                    printf("      TLS SNI: %s\n", meta->sni);
+                    PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS SNI: %s\n", meta->sni);
                 }
             }
         }
@@ -107,7 +107,7 @@ static void parse_extensions(const uint8_t *exts, size_t exts_len, struct tls_me
                 if (l > 0 && (p + l) <= end && l < sizeof(meta->alpn)) {
                     memcpy(meta->alpn, p, l);
                     meta->alpn[l] = '\0';
-                    printf("      TLS ALPN: %s\n", meta->alpn);
+                    PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS ALPN: %s\n", meta->alpn);
                 }
             }
         }
@@ -192,7 +192,7 @@ void parse_tls(const pkt_view *pv)
 
         if (ct < 20 || ct > 23) return;
 
-        printf("      TLS: content_type=%u (%s) record_len=%u\n", ct, tls_ct_name(ct), rlen);
+        PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS: content_type=%u (%s) record_len=%u\n", ct, tls_ct_name(ct), rlen);
 
         if (remain < 5u + rlen) return;
 
@@ -201,7 +201,7 @@ void parse_tls(const pkt_view *pv)
 
         if (ct == 23) {
             stats_update(PROTO_TLS_APPDATA, rpay);
-            printf("      TLS Application Data (%zu bytes)\n", rpay);
+            PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS Application Data (%zu bytes)\n", rpay);
         } else if (ct == 22) {
             stats_update(PROTO_TLS_HANDSHAKE, rpay);
             size_t hp = 0;
@@ -216,7 +216,7 @@ void parse_tls(const pkt_view *pv)
                 snprintf(dstbuf, sizeof(dstbuf), "%s:%u", pv->dst_ip, pv->dst_port);
 
                 if (hs_type == 1) { // ClientHello
-                    printf("      TLS Handshake: ClientHello (len=%u)\n", hs_len);
+                    PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS Handshake: ClientHello (len=%u)\n", hs_len);
                     parse_client_hello(hs + 4, hs_len, &meta);
                     
                     stats_record_tls(srcbuf, dstbuf,
@@ -225,7 +225,7 @@ void parse_tls(const pkt_view *pv)
                         meta.version[0] ? meta.version : "-",
                         "-", "-", "-");
                 } else if (hs_type == 2) { // ServerHello
-                    printf("      TLS Handshake: ServerHello (len=%u)\n", hs_len);
+                    PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS Handshake: ServerHello (len=%u)\n", hs_len);
                     parse_server_hello(hs + 4, hs_len, &meta);
                     
                     stats_record_tls(srcbuf, dstbuf,
@@ -234,7 +234,7 @@ void parse_tls(const pkt_view *pv)
                         meta.version[0] ? meta.version : "-",
                         meta.cipher[0] ? meta.cipher : "-", "-", "-");
                 } else if (hs_type == 11) { // Certificate
-                    printf("      TLS Handshake: Certificate (len=%u)\n", hs_len);
+                    PARSER_LOG_LAYER("TLS", COLOR_TLS, "      TLS Handshake: Certificate (len=%u)\n", hs_len);
 
                     const uint8_t *q = hs + 4;        // skip handshake header
                     size_t remain = hs_len;           // hs_len is payload length, NOT including 4 header bytes

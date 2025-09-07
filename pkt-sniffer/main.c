@@ -14,12 +14,26 @@
 #include "tcp_reass.h"
 #include "parse_tunnel.h"
 #include "time.h"
+#include "debug.h"
 
 static inline double now_sec(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec / 1e9;
 }
+
+#define DBG_PARSER    (1 << 0)
+#define DBG_TCP_REASS (1 << 1)
+#define DBG_L4        (1 << 2)
+#define DBG_IP        (1 << 3)
+#define DBG_ETH       (1 << 4)
+#define DBG_TCP       (1 << 5)
+#define DBG_UDP       (1 << 6)
+#define DBG_HTTP      (1 << 7)
+#define DBG_DNS       (1 << 8)
+#define DBG_DHCP      (1 << 9)
+#define DBG_ARP       (1 << 10)
+#define DBG_IPFRAG    (1 << 11)
 
 // Main packet processing loop
 int main(int argc, char **argv) 
@@ -29,6 +43,13 @@ int main(int argc, char **argv)
     uint64_t count = 0;
     double t_start = now_sec();
 
+#if 0
+    DEBUG_MASK = DBG_PARSER | DBG_ETH | DBG_TCP_REASS | DBG_ARP | DBG_DHCP | DBG_HTTP |
+                 DBG_IP | DBG_IPFRAG | DBG_L4 | DBG_TCP | DBG_UDP | DBG_DNS;
+#endif
+
+    DEBUG_MASK = DBG_PARSER;
+    
     cli_parse(argc, argv);
     setup_signal_handlers();
     tcp_reass_init();

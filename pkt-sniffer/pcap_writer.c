@@ -16,7 +16,6 @@ int pcap_writer_init(void) {
     }
 
     dumper = pcap_dump_open(dead_handle, g_filters.write_file);
-    printf("RAMAN : pcap file %s \n", g_filters.write_file);
     if (!dumper) {
         fprintf(stderr, "pcap_dump_open failed: %s\n", pcap_geterr(dead_handle));
         return -1;

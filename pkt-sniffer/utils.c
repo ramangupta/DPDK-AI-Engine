@@ -1,22 +1,59 @@
 #include <stdio.h>
 #include "utils.h"
 #include <rte_byteorder.h>
+#include "debug.h"
 
-void print_mac(const uint8_t *m) {
-    printf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
+void print_mac_flow(const uint8_t *m, const uint8_t *n) {
+    PARSER_LOG_LAYER("ETH", COLOR_ETH, 
+                    "%02x:%02x:%02x:%02x:%02x:%02x → %02x:%02x:%02x:%02x:%02x:%02x", 
+                    m[0], m[1], m[2], m[3], m[4], m[5],
+                    n[0], n[1], n[2], n[3], n[4], n[5]);
 }
 
-void print_ipv4(uint32_t be_addr) {
-    uint32_t a = rte_be_to_cpu_32(be_addr);
-    printf("%u.%u.%u.%u", (a>>24)&0xff, (a>>16)&0xff, (a>>8)&0xff, a&0xff);
+void print_ip_flow(uint32_t src_be_addr, uint32_t dst_be_addr) {
+
+    uint32_t a = rte_be_to_cpu_32(src_be_addr);
+    uint32_t b = rte_be_to_cpu_32(dst_be_addr);
+
+    PARSER_LOG_LAYER("IP", COLOR_IP, 
+                    "%u.%u.%u.%u → %u.%u.%u.%u", 
+                    (a>>24)&0xff, (a>>16)&0xff, (a>>8)&0xff, a&0xff,
+                    (b>>24)&0xff, (b>>16)&0xff, (b>>8)&0xff, b&0xff);
 }
 
-void print_ipv6_addr(const uint8_t a[16]) {
-    for (int i = 0; i < 16; i += 2) {
-        printf("%02x%02x", a[i], a[i+1]);
-        if (i < 14) printf(":");
-    }
+void print_icmpv6_addr(const uint8_t a[16]) 
+{ 
+    for (int i = 0; i < 16; i += 2) 
+    { 
+        PARSER_LOG_LAYER("ICMPv6", COLOR_ICMP, "%02x%02x", 
+            a[i], a[i+1]); 
+        if (i < 14) 
+        printf(":"); 
+    } 
 }
+
+void print_ipv6_flow(const uint8_t src[16], const uint8_t dst[16]) {
+    char src_buf[64], dst_buf[64];
+
+    // format IPv6 address into string
+    snprintf(src_buf, sizeof(src_buf),
+             "%x:%x:%x:%x:%x:%x:%x:%x",
+             (src[0] << 8) | src[1], (src[2] << 8) | src[3],
+             (src[4] << 8) | src[5], (src[6] << 8) | src[7],
+             (src[8] << 8) | src[9], (src[10] << 8) | src[11],
+             (src[12] << 8) | src[13], (src[14] << 8) | src[15]);
+
+    snprintf(dst_buf, sizeof(dst_buf),
+             "%x:%x:%x:%x:%x:%x:%x:%x",
+             (dst[0] << 8) | dst[1], (dst[2] << 8) | dst[3],
+             (dst[4] << 8) | dst[5], (dst[6] << 8) | dst[7],
+             (dst[8] << 8) | dst[9], (dst[10] << 8) | dst[11],
+             (dst[12] << 8) | dst[13], (dst[14] << 8) | dst[15]);
+
+    // unified log like IPv4 flow
+    PARSER_LOG_LAYER("IPV6", COLOR_IP, "%s → %s", src_buf, dst_buf);
+}
+
 
 void pkt_view_dump(const pkt_view *pv) {
     printf("=== Packet View Dump ===\n");

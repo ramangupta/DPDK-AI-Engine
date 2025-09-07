@@ -5,12 +5,6 @@
 #include <string.h>
 #include <stdio.h>
 
-// ---------------- Debug -----------------
-static int DEBUG_FRAG = 1; // set to 1 for verbose logging, 0 to disable
-
-#define DLOG(fmt, ...) \
-    do { if (DEBUG_FRAG) fprintf(stderr, "[frag] " fmt "\n", ##__VA_ARGS__); } while (0)
-
 // ---------------- Config ----------------
 #define MAX_FRAG_CTX   64
 #define MAX_INTERVALS  64
@@ -49,7 +43,7 @@ static frag_ctx_t table[MAX_FRAG_CTX];
 // ----------------- helpers --------------
 static void report_ipv4_drop(uint16_t id, const char *reason) {
     // stdout so the harness always sees it (stderr still has DLOGs)
-    fprintf(stdout, "IPv4 drop (id=%u reason=%s)\n", id, reason);
+    PARSER_LOG_LAYER("IP-FRAG", COLOR_IP_FRAG, "IPv4 drop (id=%u reason=%s)\n", id, reason);
 }
 
 
@@ -77,7 +71,7 @@ static inline frag_ctx_t* alloc_ctx(uint32_t src, uint32_t dst,
         if (c->in_use) {
             if ((now - c->ts_last) > FRAG_TIMEOUT) {
                 report_ipv4_drop(c->id, "timeout");
-                DLOG("id=%u timed out -> drop", c->id);
+                DEBUG_LOG(DBG_IPFRAG, "id=%u timed out -> drop", c->id);
                 free(c->payload);
                 memset(c,0,sizeof(*c));
             }
@@ -214,7 +208,7 @@ pkt_view *frag_reass_ipv4(const struct rte_ipv4_hdr *ip4,
         memcpy(c->hdr_buf, ip4, ihl);
         c->hdr_len = ihl;
         c->have_first_hdr = 1;
-        DLOG("id=%u captured first header (ihl=%u)", id, ihl);
+        DEBUG_LOG(DBG_IPFRAG, "id=%u captured first header (ihl=%u)", id, ihl);
     }
 
     if (end && !ensure_payload_cap(c, end)) {
@@ -239,7 +233,7 @@ pkt_view *frag_reass_ipv4(const struct rte_ipv4_hdr *ip4,
         intervals_cover_full(c, c->total_len)) {
 
         // FIX in frag_ipv4.c (inside the 'emit' block)
-        DLOG("id=%u complete! emitting %u bytes", id, c->total_len);
+        DEBUG_LOG(DBG_IPFRAG, "id=%u complete! emitting %u bytes", id, c->total_len);
 
         uint8_t  hdr_len  = c->hdr_len;                 // <-- stash before memset
         uint32_t total    = hdr_len + c->total_len;
@@ -285,8 +279,8 @@ void frag_ipv4_gc(uint64_t now)
 
         if ((now - c->ts_last) > FRAG_TIMEOUT) {
             // Incomplete assembly timed out
-            fprintf(stdout, "IPv4 drop (id=%u reason=timeout)\n", c->id);
-            DLOG("id=%u timed out -> drop", c->id);
+            DEBUG_LOG(DBG_IPFRAG, "IPv4 drop (id=%u reason=timeout)\n", c->id);
+            DEBUG_LOG(DBG_IPFRAG, "id=%u timed out -> drop", c->id);
             free(c->payload);
             memset(c, 0, sizeof(*c));
         }
@@ -302,7 +296,7 @@ void frag_ipv4_flush_all(void)
             if (!(c->saw_last && c->have_first_hdr &&
                   intervals_cover_full(c, c->total_len))) {
                 // Incomplete → drop
-                DLOG("id=%u flushed incomplete -> drop", c->id);
+                DEBUG_LOG(DBG_IPFRAG, "id=%u flushed incomplete -> drop", c->id);
                 report_ipv4_drop(c->id, "incomplete");
             }
             free(c->payload);

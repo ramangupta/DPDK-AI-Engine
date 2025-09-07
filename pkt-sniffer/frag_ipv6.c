@@ -10,11 +10,6 @@
 #define MAX_INTERVALS  64
 #define FRAG_TIMEOUT   5000000000ULL // ~5s
 
-// Toggle debug output
-#ifndef IPV6_FRAG_DEBUG
-#define IPV6_FRAG_DEBUG 0
-#endif
-
 typedef struct {
     uint32_t in_use;
 
@@ -59,16 +54,16 @@ static frag_ctx6_t* find_ctx6(const struct in6_addr *src, const struct in6_addr 
             !memcmp(&c->dst, dst, sizeof(*dst)) &&
             c->id==id && c->proto==proto)
         {
-#if IPV6_FRAG_DEBUG
-        printf("[DEBUG] Match Found ctx[%d]: in_use=%d src=%s dst=%s id=%u proto=%u\n",
+
+        DEBUG_LOG(DBG_IPFRAG, "Match Found ctx[%d]: in_use=%d src=%s dst=%s id=%u proto=%u\n",
                i, c->in_use, src_str, dst_str, c->id, c->proto);
-#endif            
+        
             return c;
         }
     }
-#if IPV6_FRAG_DEBUG
-    printf("[DEBUG] no matching fragment context found\n");
-#endif
+
+    DEBUG_LOG(DBG_IPFRAG, "[DEBUG] no matching fragment context found\n");
+
 
     return NULL;
 }
@@ -123,10 +118,10 @@ static int ensure_payload_cap(frag_ctx6_t *c, uint32_t cap)
     c->payload = np;
     c->payload_cap = newcap;
 
-#if IPV6_FRAG_DEBUG
-        printf("[DEBUG] Ensure payload new capacity %d in ctx and inp cap %d\n", 
+
+    DEBUG_LOG(DBG_IPFRAG, "Ensure payload new capacity %d in ctx and inp cap %d\n", 
             c->payload_cap, cap);
-#endif
+
     return 1;
 }
 
@@ -205,18 +200,17 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
     uint32_t copy_len = pv->len - sizeof(*ip6) - sizeof(*fh);
     uint32_t end = off + copy_len;
 
-#if IPV6_FRAG_DEBUG
-    printf("[DEBUG] IPv6 frag: id=%x, offset=%u, len=%u, mf=%d, end=%d\n",
+    DEBUG_LOG(DBG_IPFRAG, "IPv6 frag: id=%x, offset=%u, len=%u, mf=%d, end=%d\n",
            frag_id, off, copy_len, more_frags, end);
-#endif
+
 
     frag_ctx6_t *c = find_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr, frag_id, ip6->proto);
     if (!c) {
         c = alloc_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr, frag_id, ip6->proto, now);
         if (!c) {
-#if IPV6_FRAG_DEBUG
-            printf("[DEBUG] Failed to allocate frag_ctx6 for id=%u\n", frag_id);
-#endif
+
+            DEBUG_LOG(DBG_IPFRAG, "Failed to allocate frag_ctx6 for id=%u\n", frag_id);
+
             return NULL;
         }
     }
@@ -224,9 +218,9 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
     c->ts_last = now;
 
     if (!ensure_payload_cap(c, end)) {
-#if IPV6_FRAG_DEBUG
-        printf("[DEBUG] Failed to ensure payload capacity for id=%u\n", frag_id);
-#endif
+
+        DEBUG_LOG(DBG_IPFRAG, "Failed to ensure payload capacity for id=%u\n", frag_id);
+
         free(c->payload);
         memset(c, 0, sizeof(*c));
         return NULL;
@@ -242,9 +236,8 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
         if (c->total_len < end) 
             c->total_len = end;  // track largest end
 
-#if IPV6_FRAG_DEBUG
-        printf("[DEBUG] Saw last fragment for id=%u, total_len=%u\n", frag_id, c->total_len);
-#endif
+        DEBUG_LOG(DBG_IPFRAG, "Saw last fragment for id=%u, total_len=%u\n", frag_id, c->total_len);
+
     }
 
     // Check full reassembly using tracked total_len
@@ -256,19 +249,15 @@ pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr,
         memcpy((uint8_t*)full->data + sizeof(*ip6), c->payload, c->total_len);
         full->len = sizeof(*ip6) + c->total_len;
 
-#if IPV6_FRAG_DEBUG
-        printf("[DEBUG] IPv6 reassembled (id=%u) total_len=%u\n", frag_id, full->len);
-#endif
+        PARSER_LOG_LAYER("IPv6-FRAG", COLOR_IP_FRAG, "IPv6 reassembled (id=%u) total_len=%u\n", frag_id, full->len);
 
         free(c->payload);
         memset(c, 0, sizeof(*c));
         return full;
     }
 
-#if IPV6_FRAG_DEBUG
-    printf("[DEBUG] IPv6 fragment buffered (id=%u) offset=%u len=%u\n",
+    PARSER_LOG_LAYER("IPv6-FRAG", COLOR_IP_FRAG, "IPv6 fragment buffered (id=%u) offset=%u len=%u\n",
            frag_id, off, copy_len);
-#endif
 
     return NULL;
 }
@@ -279,13 +268,13 @@ void frag_ipv6_flush_all(void)
     for (int i = 0; i < MAX_FRAG_CTX; i++) {
         frag_ctx6_t *c = &table[i];
         if (c->payload) {
-#if IPV6_FRAG_DEBUG
+
             char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
             inet_ntop(AF_INET6, &c->src, src, sizeof(src));
             inet_ntop(AF_INET6, &c->dst, dst, sizeof(dst));
-            printf("[DEBUG] Flushing incomplete IPv6 frag id=%u %s → %s\n",
+            DEBUG_LOG(DBG_IPFRAG, "Flushing incomplete IPv6 frag id=%u %s → %s\n",
                    c->id, src, dst);
-#endif
+
             free(c->payload);
             memset(c, 0, sizeof(*c));
         }

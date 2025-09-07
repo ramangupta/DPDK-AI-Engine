@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "tunnel_types.h"
+#include "debug.h"
 
 #ifndef DPDK_DEBUG
 #define DPDK_DEBUG    0

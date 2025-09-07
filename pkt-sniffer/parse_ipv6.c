@@ -33,7 +33,7 @@ uint8_t parse_ipv6_extensions(const uint8_t *data, uint16_t len,
             nh == IPPROTO_AH || nh == IPPROTO_ESP) {
 
             if (remaining < 2) {
-                printf("      IPv6 ext <truncated>\n");
+                DEBUG_LOG(DBG_IP,"      IPv6 ext <truncated>\n");
                 return nh;
             }
 
@@ -44,7 +44,7 @@ uint8_t parse_ipv6_extensions(const uint8_t *data, uint16_t len,
                 ext_len = (ptr[1] + 1) * 8;
 
             if (ext_len > remaining) {
-                printf("      IPv6 ext <bad len>\n");
+                DEBUG_LOG(DBG_IP,"      IPv6 ext <bad len>\n");
                 return nh;
             }
 
@@ -62,7 +62,8 @@ uint8_t parse_ipv6_extensions(const uint8_t *data, uint16_t len,
 
                 pkt_view *full = frag_reass_ipv6(ptr, slice, now);
                 if (!full) {
-                    printf("IPv6 fragment buffered\n");
+                    PARSER_LOG_LAYER("IPv6-FRAG", COLOR_IP_FRAG,
+                                     "IPv6 fragment buffered");
                     stats_record_ipv6_frag((const uint8_t *)&ip6->src_addr,
                                            (const uint8_t *)&ip6->dst_addr,
                                            frag_id, off, more_frags, now, 0);
@@ -82,7 +83,7 @@ uint8_t parse_ipv6_extensions(const uint8_t *data, uint16_t len,
                 ptr = slice->data + sizeof(struct rte_ipv6_hdr);
                 remaining = slice->len - sizeof(struct rte_ipv6_hdr);
                 nh = ((struct rte_ipv6_hdr*)slice->data)->proto;
-                printf("IPv6 reassembled\n");
+                PARSER_LOG_LAYER("IP-FRAG", COLOR_IP_FRAG, "IPv6 reassembled");
                 continue;
             }
 
@@ -102,7 +103,7 @@ uint8_t parse_ipv6_extensions(const uint8_t *data, uint16_t len,
 void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 {
     if (pv_slice->len < sizeof(struct rte_ipv6_hdr)) {
-        printf("      IPv6 <truncated>\n");
+        DEBUG_LOG(DBG_IP,"      IPv6 <truncated>\n");
         return;
     }
 
@@ -114,11 +115,9 @@ void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
     inet_ntop(AF_INET6, &ip6->src_addr, pv_full->src_ip, sizeof(pv_full->src_ip));
     inet_ntop(AF_INET6, &ip6->dst_addr, pv_full->dst_ip, sizeof(pv_full->dst_ip));
 
-    printf("      IPv6 ");
-    print_ipv6_addr((const uint8_t *)&ip6->src_addr);
-    printf(" → ");
-    print_ipv6_addr((const uint8_t *)&ip6->dst_addr);
-    printf(" next=%u hlim=%u\n", ip6->proto, ip6->hop_limits);
+    PARSER_LOG_LAYER("IPv6", COLOR_IP, "      IPv6 ");
+    print_ipv6_flow((const uint8_t *)&ip6->src_addr, (const uint8_t *)&ip6->dst_addr);
+    PARSER_LOG_LAYER("IPv6", COLOR_IP, " next=%u hlim=%u\n", ip6->proto, ip6->hop_limits);
 
     // Walk extension headers
     const uint8_t *payload = (const uint8_t*)(ip6 + 1);
@@ -159,7 +158,7 @@ void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
         pv_full->tunnel    = pv_payload.tunnel;
         pv_full->inner_pkt = pv_payload.inner_pkt;
 
-        printf("      IPv6 Tunnel detected: %s\n",
+        PARSER_LOG_LAYER("IPv6", COLOR_IP, "      IPv6 Tunnel detected: %s\n",
                (pv_full->tunnel.type == TUNNEL_GRE)    ? "GRE" :
                (pv_full->tunnel.type == TUNNEL_VXLAN)  ? "VXLAN" :
                (pv_full->tunnel.type == TUNNEL_GENEVE) ? "GENEVE" : "OTHER");
@@ -176,7 +175,7 @@ void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
             else if (pv_full->tunnel.inner_proto == 0x86DD)
                 handle_ipv6(pv_full, pv_payload.inner_pkt, now);
             else
-                printf("      GRE unsupported inner proto=0x%04x\n",
+                DEBUG_LOG(DBG_IP,"      GRE unsupported inner proto=0x%04x\n",
                        pv_full->tunnel.inner_proto);
             break;
 
