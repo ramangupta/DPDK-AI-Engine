@@ -9,7 +9,18 @@
 Think of it as **tcpdump on steroids** — nanosecond precision, flow-aware, and ready for ML pipelines.
 
 ---
+
+## ✨ Highlights
+
+- 🚀 **Capture Engines** – DPDK (ultra-low latency) & PCAP/AF_PACKET (dev/testing).  
+- 📊 **Real-Time Stats** – throughput, protocol counters, TCP reassembly, flow metrics.  
+- 🔎 **Deep Protocol Visibility** – IPv4/IPv6, ARP, ICMP, UDP, TCP, DNS, DHCP, HTTP, TLS.  
+- 🧠 **AI-Ready** – JSON stats + feature hooks for anomaly detection & ML.  
+- 📈 **Dashboard & CLI** – console summaries + JSON output for Grafana/Prometheus.  
+
 ---
+
+## 🔥 DashBoard
 
 ![Dashboard Screenshot](docs/dashboard.png)
 
