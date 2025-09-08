@@ -1,10 +1,14 @@
-# 🚀 ⚡ DPDK AI ENGINE: Ultra-Low Latency Packet Analytics with DPDK & AI 🚀
+# ⚡🚀 DPDK-AI-Engine: Next-Gen Packet Analytics
 
-`DPDK-AI-Engine` is a **blazing-fast packet analytics framework** designed for environments where **microseconds matter**.
-It combines **DPDK’s zero-copy packet capture** with an **AI-ready analytics engine**, enabling deep insights into live traffic at **line rate**.
+[![Build](https://img.shields.io/github/actions/workflow/status/<your-org>/<repo>/ci.yml?branch=master)](../../actions)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/<your-org>/<repo>?style=social)](../../stargazers)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](../../issues)
 
-Think of it as **tcpdump on steroids** — flow-aware, protocol-smart, and ready for machine learning.
+**DPDK-AI-Engine** is a **blazing-fast packet analytics framework** built on **DPDK** for zero-copy capture and **AI-ready hooks** for advanced traffic insights.  
+Think of it as **tcpdump on steroids** — nanosecond precision, flow-aware, and ready for ML pipelines.
 
+---
 ---
 
 ![Dashboard Screenshot](docs/dashboard.png)
