@@ -18,8 +18,6 @@
 #define MAX_HTTP_SESSIONS 1024
 #define ARP_MAX_ENTRIES 64
 
-extern struct stats global_stats;
-
 enum ip_version { IPV4 = 4, IPV6 = 6 };
 
 // Enum for protocol classification
@@ -40,17 +38,7 @@ enum proto_type {
 
 const char *protocol_name(enum proto_type p); 
 
-/* Per protocol Bandwidth */
-typedef struct {
-    uint64_t pkts_total;
-    uint64_t bytes_total;
-    uint64_t pkts_interval;
-    uint64_t bytes_interval;
-} proto_stats_t;
-
-extern proto_stats_t proto_stats[MAX_PROTO];
-
-// Define stats structure
+// ---------------- Global Stats ----------------
 struct stats {
     uint64_t ipv4;
     uint64_t ipv6;
@@ -62,12 +50,61 @@ struct stats {
     uint64_t tls_handshake;
     uint64_t tls_appdata;
     uint64_t http;
+
+    // TCP reassembly
     uint64_t tcp_segments;
     uint64_t tcp_bytes;
     uint64_t tcp_duplicates;
     uint64_t tcp_overlaps;
     uint64_t tcp_out_of_order;
+
+    uint64_t dropped_total;         // total app drops
+    uint64_t drop_truncated_eth;    // too short for ethernet header
+    uint64_t drop_invalid_ipv4;     // bad/short IPv4
+    uint64_t drop_invalid_ipv6;     // bad/short IPv6
+    uint64_t drop_invalid_l4;       // bad/short L4
+    uint64_t drop_truncated_udp;    // UDP Truncated
+    uint64_t drop_truncated_tcp;    // TCP Truncated
+    uint64_t drop_bad_header_tcp;   // TCP bad header
+    uint64_t drop_non_udp_tcp;      // Not an UDP or TCP proto
+    uint64_t drop_unknown_l7;       // Unknown L7
+    uint64_t drop_invalid_tunnel;   // Invalid Tunnel
+    uint64_t drop_invalid_dns;      // Invalid DNS
+    uint64_t drop_checksum;         // L3/L4 checksum failures
+    uint64_t drop_filter_miss;      // didn’t pass filter
+    uint64_t drop_invalid_ethertype; // Ethertype not decoded
+    uint64_t drop_other;            // catch-all
+    unsigned long dropped;      // total dropped packets
+    unsigned long dropped_hw;
+    unsigned long tcp_seg_dropped; // dropped TCP segments (preallocated pool overflow)
+
+    // IPv4 frag/reassembly stats
+    uint64_t ipv4_frag_allocs;        // new contexts allocated
+    uint64_t ipv4_frag_timeouts;      // stale contexts flushed
+    uint64_t ipv4_frag_flushes;       // flush_all at shutdown
+    uint64_t ipv4_frag_expands;       // payload buffer grew
+    uint64_t ipv4_frag_drops;         // dropped due to alloc/realloc failure
+    uint64_t ipv4_frag_received;      // fragments seen
+    uint64_t ipv4_frag_reassembled;   // successful reassemblies
+
+    // IPv6 frag/reassembly stats
+    uint64_t ipv6_frag_allocs;        // new contexts allocated
+    uint64_t ipv6_frag_timeouts;      // stale contexts flushed
+    uint64_t ipv6_frag_flushes;       // flush_all at shutdown
+    uint64_t ipv6_frag_expands;       // payload buffer grew
+    uint64_t ipv6_frag_drops;         // dropped due to alloc/realloc failure
+    uint64_t ipv6_frag_received;      // fragments seen
+    uint64_t ipv6_frag_reassembled;   // successful reassemblies
+
 };
+
+// ---------------- Protocol Stats ----------------
+typedef struct {
+    uint64_t pkts_total;
+    uint64_t bytes_total;
+    uint64_t pkts_interval;
+    uint64_t bytes_interval;
+} proto_stats_t;
 
 // DHCP transaction
 struct dhcp_stat {
@@ -134,22 +171,60 @@ typedef struct {
     uint64_t bytes;
 } http_session_t;
 
-typedef struct tunnel_stats_s {
+
+// ---------------- Tunnel Stats ----------------
+typedef struct {
     uint64_t gre_pkts;
     uint64_t gre_bytes;
-
     uint64_t vxlan_pkts;
     uint64_t vxlan_bytes;
-
     uint64_t geneve_pkts;
     uint64_t geneve_bytes;
 } tunnel_stats_t;
 
+
+// ---------------- Perf Stats ----------------
+typedef struct {
+    struct timeval start_time;
+    struct timeval end_time;
+
+    uint64_t total_pkts;
+    uint64_t total_bytes;
+
+    // Derived metrics
+    double runtime_sec;
+    double pps;       // Packets per second
+    double bps;       // Bytes per second
+    double mbps;      // Megabits per second
+
+    // Latency (if collected)
+    uint64_t latency_samples;
+    uint64_t latency_min_ns;
+    uint64_t latency_max_ns;
+    uint64_t latency_sum_ns;
+
+    uint64_t stats_write_ns;
+} perf_stats_t;
+
+// ---------------- Externs ----------------
+extern struct stats global_stats;
+extern proto_stats_t proto_stats[MAX_PROTO];
+extern tunnel_stats_t tunnel_stats;
+extern perf_stats_t perf_stats;
+
+
 // Function prototypes
 
 void stats_update(enum proto_type p, uint16_t pktlen);
-void stats_poll(uint64_t now_tsc);
+void stats_poll(void);
 void stats_report(void); // prints only
+void stats_report_final(void);
+
+void perf_init(void);
+void perf_start(void);
+void perf_stop(void);
+void perf_update(uint16_t pktlen, uint64_t pkt_ns);
+void perf_record_latency(uint64_t ns);
 
 // Flow-specific recorders
 void stats_record_dhcp(uint32_t xid, const char *msgtype, const char *ip);

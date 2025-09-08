@@ -5,6 +5,6 @@
 #include <rte_ether.h>
 
 /* Entry point for parsing */
-void parse_packet(pkt_view *pv, uint64_t now_tsc);
+void parse_packet(pkt_view *pv_full);
 
 #endif // PARSE_ETH_H

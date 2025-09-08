@@ -36,11 +36,14 @@ void cli_usage(const char *prog) {
     printf("  -i, --ip <IPv4/IPv6>\n");
     printf("  -H, --host <substring>\n");
     printf("  -w, --write-pcap <file>  Save captured packets to PCAP file\n");
+    printf("  -r, --pcap <file>        Read packets from a PCAP file\n");
+    printf("  -c, --console-stats      Print periodic console summaries (optional)\n");
     printf("  -h, --help\n");
     printf("\nNotes:\n");
     printf("  * Unknown options (e.g., DPDK EAL flags like --no-pci, -vdev=...) are ignored.\n");
     printf("  * DNS means TCP/53 or UDP/53.\n");
 }
+
 
 void cli_parse(int argc, char **argv) {
     filter_init();
@@ -51,7 +54,7 @@ void cli_parse(int argc, char **argv) {
 
     int opt;
     // IMPORTANT: use getopt_long_only to avoid exploding '-vdev=...' into -v -d -e -v ...
-    while ((opt = getopt_long_only(argc, argv, "p:P:i:H:h", long_opts, NULL)) != -1) {
+    while ((opt = getopt_long_only(argc, argv, "p:P:i:H:hw:r:c", long_opts, NULL)) != -1) {
         switch (opt) {
         case 'p':
             g_filters.filter_proto = true;
@@ -142,7 +145,11 @@ void cli_parse(int argc, char **argv) {
             g_filters.read_pcap = true;
             strncpy(g_filters.read_file, optarg, sizeof(g_filters.read_file));
             break;
-            
+        
+        case 'c':
+            g_filters.console_stats = true;
+            break;
+
         case '?': // unknown option; skip
         default:
             // let DPDK handle it later

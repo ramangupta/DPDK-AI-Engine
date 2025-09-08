@@ -8,6 +8,8 @@ void handle_arp(pkt_view *pv_full, const pkt_view *pv_slice)
 {
     if (pv_slice->len < sizeof(struct rte_arp_hdr)) {
         DEBUG_LOG(DBG_ARP, "      ARP <truncated>\n");
+        global_stats.drop_truncated_eth++;
+        global_stats.dropped++;
         return;
     }
 
@@ -65,6 +67,8 @@ void handle_arp(pkt_view *pv_full, const pkt_view *pv_slice)
         break;
     default:
         PARSER_LOG_LAYER("ARP", COLOR_ARP, "      ARP opcode=%u (not supported)\n", ntohs(arp->arp_opcode));
+        global_stats.drop_other++;
+        global_stats.dropped++;
         break;
     }
 }

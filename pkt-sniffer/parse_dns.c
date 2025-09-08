@@ -51,6 +51,8 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response, uint64
 {
     if (len < sizeof(struct dns_hdr)) { 
         PARSER_LOG_LAYER("DNS", COLOR_DNS, "        DNS <truncated>\n"); 
+        global_stats.drop_invalid_dns++;
+        global_stats.dropped++;
         return; 
     }
 
@@ -82,10 +84,14 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response, uint64
         char name[256];
         if (read_qname(payload, len, &off, name, sizeof(name)) < 0) { 
             PARSER_LOG_LAYER("DNS", COLOR_DNS, "          QNAME <bad>\n"); 
+            global_stats.drop_invalid_dns++;
+            global_stats.dropped++;
             return; 
         }
         if (off + 4 > len) { 
             PARSER_LOG_LAYER("DNS", COLOR_DNS, "          Q <truncated>\n"); 
+            global_stats.drop_invalid_dns++;
+            global_stats.dropped++;
             return; 
         }
         uint16_t qtype  = be16(payload + off); off += 2;
@@ -104,10 +110,14 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response, uint64
         char name[256];
         if (read_qname(payload, len, &off, name, sizeof(name)) < 0) { 
             DEBUG_LOG(DBG_DNS, "          ANAME <bad>\n"); 
+            global_stats.drop_invalid_dns++;
+            global_stats.dropped++;
             return; 
         }
         if (off + 10 > len) { 
             DEBUG_LOG(DBG_DNS, "          A <truncated>\n"); 
+            global_stats.drop_invalid_dns++;
+            global_stats.dropped++;
             return; 
         }
         uint16_t type   = be16(payload + off); off += 2;
@@ -118,6 +128,8 @@ void parse_dns_udp(const uint8_t *payload, uint16_t len, int is_response, uint64
         uint16_t rdlen  = be16(payload + off); off += 2;
         if (off + rdlen > len) { 
             DEBUG_LOG(DBG_DNS, "          RDATA <truncated>\n"); 
+            global_stats.drop_invalid_dns++;
+            global_stats.dropped++;
             return; 
         }
 

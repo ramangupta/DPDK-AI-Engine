@@ -104,6 +104,8 @@ void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 {
     if (pv_slice->len < sizeof(struct rte_ipv6_hdr)) {
         DEBUG_LOG(DBG_IP,"      IPv6 <truncated>\n");
+        global_stats.drop_invalid_ipv6++;
+        global_stats.dropped++;
         return;
     }
 
@@ -174,14 +176,17 @@ void handle_ipv6(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
                 handle_ipv4(pv_full, pv_payload.inner_pkt, now);
             else if (pv_full->tunnel.inner_proto == 0x86DD)
                 handle_ipv6(pv_full, pv_payload.inner_pkt, now);
-            else
+            else {
                 DEBUG_LOG(DBG_IP,"      GRE unsupported inner proto=0x%04x\n",
                        pv_full->tunnel.inner_proto);
+                global_stats.drop_invalid_tunnel++;
+                global_stats.dropped++;
+            }
             break;
 
         case TUNNEL_VXLAN:
         case TUNNEL_GENEVE:
-            parse_packet(pv_payload.inner_pkt, now);
+            parse_packet(pv_payload.inner_pkt);
             break;
 
         default:

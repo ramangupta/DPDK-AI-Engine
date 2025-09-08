@@ -6,11 +6,17 @@
 #include <rte_ip.h>
 #include "capture.h"
 
-#define MAX_FRAG_CTX   64
-#define MAX_INTERVALS  64
-#define FRAG_TIMEOUT   5000000000ULL // ~5s
+#define MAX_FRAG_CTX        32768
+#define HASH_SIZE           16384   // power-of-2, adjust if needed
+#define MAX_INTERVALS       32
+#define INITIAL_PAYLOAD_CAP 8192    // 8 KB start
+#define FRAG_V6_TIMEOUT_NS (60ULL * 1000000000ULL)
+#define STALE_BATCH  128    // process 128 contexts per stale flush
 
-typedef struct {
+atomic_ulong ipv6_frag_timeouts;
+
+// ------------------ Context Struct ------------------
+typedef struct frag_ctx6 {
     uint32_t in_use;
 
     struct in6_addr src;
@@ -29,254 +35,273 @@ typedef struct {
     int iv_count;
 
     int saw_last;
-    uint32_t  total_len;
+    uint32_t total_len;
+
+    struct frag_ctx6 *next;        // hash bucket chain
+    struct frag_ctx6 *next_active; // active list
 } frag_ctx6_t;
 
-static frag_ctx6_t table[MAX_FRAG_CTX];
+// ------------------ Globals ------------------
+static frag_ctx6_t table[MAX_FRAG_CTX];          // pre-allocated pool
+static frag_ctx6_t* hash_table[HASH_SIZE];       // hash buckets
+static frag_ctx6_t *free_list = NULL;           // free pool
+static frag_ctx6_t *active_list = NULL;         // active contexts for GC
 
-// ---------------- Helpers ----------------
-static frag_ctx6_t* find_ctx6(const struct in6_addr *src, const struct in6_addr *dst,
-                             uint32_t id, uint8_t proto)
+// ------------------ Helpers ------------------
+static inline uint64_t tsc_to_ns(uint64_t tsc)
 {
-    char src_str[INET6_ADDRSTRLEN];
-    char dst_str[INET6_ADDRSTRLEN];
+#ifdef USE_DPDK
+    uint64_t hz = rte_get_tsc_hz();
+    return (tsc * 1000000000ULL) / hz;
+#else
+    return tsc;
+#endif
+}
 
-    for (int i=0;i<MAX_FRAG_CTX;i++) {
-        frag_ctx6_t *c = &table[i];
+static inline uint32_t hash_frag_ctx6(const struct in6_addr *src,
+                                      const struct in6_addr *dst,
+                                      uint32_t id, uint8_t proto)
+{
+    uint32_t h = 0;
+    for(int i=0;i<16;i++) h ^= ((uint8_t*)src->s6_addr)[i];
+    for(int i=0;i<16;i++) h ^= ((uint8_t*)dst->s6_addr)[i];
+    h ^= id;
+    h ^= proto;
+    return h & (HASH_SIZE-1);
+}
 
-        // Convert addresses to printable form
-        inet_ntop(AF_INET6, &c->src, src_str, sizeof(src_str));
-        inet_ntop(AF_INET6, &c->dst, dst_str, sizeof(dst_str));
+// ------------------ Init ------------------
+void frag_reass_ipv6_init(void) 
+{
+    free_list = &table[0];
+    for(int i=0;i<MAX_FRAG_CTX-1;i++)
+        table[i].next = &table[i+1];
+    table[MAX_FRAG_CTX-1].next = NULL;
 
+    memset(hash_table, 0, sizeof(hash_table));
+    active_list = NULL;
+}
 
-        if (c->in_use &&
-            !memcmp(&c->src, src, sizeof(*src)) &&
-            !memcmp(&c->dst, dst, sizeof(*dst)) &&
-            c->id==id && c->proto==proto)
-        {
+// ------------------ Allocation / Free ------------------
+frag_ctx6_t* alloc_ctx6(const struct in6_addr *src, const struct in6_addr *dst,
+                        uint32_t id, uint8_t proto, uint64_t now_ns)
+{
+    if (!free_list) return NULL;
+    frag_ctx6_t *c = free_list;
+    free_list = c->next;
 
-        DEBUG_LOG(DBG_IPFRAG, "Match Found ctx[%d]: in_use=%d src=%s dst=%s id=%u proto=%u\n",
-               i, c->in_use, src_str, dst_str, c->id, c->proto);
-        
-            return c;
-        }
+    memset(c, 0, sizeof(*c));
+    c->in_use = 1;
+    memcpy(&c->src, src, sizeof(*src));
+    memcpy(&c->dst, dst, sizeof(*dst));
+    c->id = id;
+    c->proto = proto;
+    c->ts_last = now_ns;
+
+    // hash bucket insert
+    uint32_t h = hash_frag_ctx6(src, dst, id, proto);
+    c->next = hash_table[h];
+    hash_table[h] = c;
+
+    // active list insert
+    c->next_active = active_list;
+    active_list = c;
+
+    global_stats.ipv6_frag_allocs++;
+    return c;
+}
+
+static void free_ctx6(frag_ctx6_t *c)
+{
+    if (!c || !c->in_use) return;
+
+    // remove from hash table
+    uint32_t h = hash_frag_ctx6(&c->src, &c->dst, c->id, c->proto);
+    frag_ctx6_t **pp = &hash_table[h];
+    while(*pp) {
+        if(*pp == c) { *pp = c->next; break; }
+        pp = &(*pp)->next;
     }
 
-    DEBUG_LOG(DBG_IPFRAG, "[DEBUG] no matching fragment context found\n");
+    // remove from active list
+    frag_ctx6_t **pa = &active_list;
+    while(*pa) {
+        if(*pa == c) { *pa = c->next_active; break; }
+        pa = &(*pa)->next_active;
+    }
 
+    if(c->payload) free(c->payload);
+    memset(c, 0, sizeof(*c));
 
+    // push back to free list
+    c->next = free_list;
+    free_list = c;
+}
+
+// ------------------ Lookup ------------------
+frag_ctx6_t* find_ctx6(const struct in6_addr *src, const struct in6_addr *dst,
+                       uint32_t id, uint8_t proto)
+{
+    uint32_t h = hash_frag_ctx6(src,dst,id,proto);
+    frag_ctx6_t *c = hash_table[h];
+    while(c) {
+        if(c->in_use &&
+           !memcmp(&c->src, src, sizeof(*src)) &&
+           !memcmp(&c->dst, dst, sizeof(*dst)) &&
+           c->id==id && c->proto==proto)
+            return c;
+        c = c->next;
+    }
     return NULL;
 }
 
-static frag_ctx6_t* alloc_ctx6(const struct in6_addr *src, const struct in6_addr *dst,
-                              uint32_t id, uint8_t proto, uint64_t now)
+// ------------------ Stale GC ------------------
+void frag_ipv6_flush_stale(uint64_t now_ns)
 {
-    // GC stale contexts
-    for (int i=0;i<MAX_FRAG_CTX;i++) {
-        frag_ctx6_t *c = &table[i];
-        if (c->in_use && (now - c->ts_last) > FRAG_TIMEOUT) {
-            free(c->payload);
+    frag_ctx6_t **pp = &active_list;
+    int processed = 0;
+
+    while(*pp && processed < STALE_BATCH) {
+        frag_ctx6_t *c = *pp;
+
+        if (c->in_use && (now_ns - c->ts_last > FRAG_V6_TIMEOUT_NS)) {
+            // Remove from active list
+            *pp = c->next;
+
+            // Flush payload
+            if(c->payload) free(c->payload);
             memset(c, 0, sizeof(*c));
-        }
-    }
 
-    for (int i=0;i<MAX_FRAG_CTX;i++) {
-        if (!table[i].in_use) {
-            frag_ctx6_t *c = &table[i];
-            memset(c,0,sizeof(*c));
-            c->in_use = 1;
-            memcpy(&c->src, src, sizeof(*src));
-            memcpy(&c->dst, dst, sizeof(*dst));
-            c->id = id;
-            c->proto = proto;
-            c->ts_last = now;
-            return c;
+            // Add back to free list
+            c->next = free_list;
+            free_list = c;
+
+            global_stats.ipv6_frag_timeouts++;
+            global_stats.dropped++;
+
+            processed++;
+        } else {
+            pp = &(*pp)->next;  // move to next node
+            processed++;
         }
     }
-    return NULL;
 }
 
+// ------------------ Flush All ------------------
+void frag_ipv6_flush_all(void)
+{
+    frag_ctx6_t *c = active_list;
+    while(c) {
+        frag_ctx6_t *next = c->next_active;
+        free_ctx6(c);
+        c = next;
+    }
+}
+
+// ------------------ Payload Helpers ------------------
 static int ensure_payload_cap(frag_ctx6_t *c, uint32_t cap)
 {
-    if (c->payload_cap >= cap) {
-        return 1;
-    }
-
-
-    uint32_t newcap = c->payload_cap ? c->payload_cap : 2048;
-
-    while (newcap < cap) 
-        newcap *= 2;
+    if (c->payload_cap >= cap) return 1;
+    uint32_t newcap = c->payload_cap ? c->payload_cap : INITIAL_PAYLOAD_CAP;
+    while(newcap < cap) newcap *= 2;
 
     uint8_t *np = realloc(c->payload, newcap);
-    if (!np) 
-        return 0;
-    
-    if (newcap > c->payload_cap)
+    if(!np) { global_stats.ipv6_frag_drops++; return 0; }
+
+    if(newcap > c->payload_cap) {
+        global_stats.ipv6_frag_expands++;
         memset(np + c->payload_cap, 0, newcap - c->payload_cap);
+    }
 
     c->payload = np;
     c->payload_cap = newcap;
-
-
-    DEBUG_LOG(DBG_IPFRAG, "Ensure payload new capacity %d in ctx and inp cap %d\n", 
-            c->payload_cap, cap);
-
     return 1;
 }
 
+// ------------------ Interval Helpers ------------------
 static void intervals_add_merge(frag_ctx6_t *c, uint32_t s, uint32_t e)
 {
-    // Insert new interval in sorted order and merge
-    int i = 0;
-    while (i < c->iv_count && c->iv[i].start < s) i++;
+    if(s >= e) return;
 
-    if (s >= e) return;
+    if(c->iv_count < MAX_INTERVALS)
+        c->iv[c->iv_count++] = (typeof(c->iv[0])){s,e};
 
-    // insert new interval at end
-    if (c->iv_count < MAX_INTERVALS)
-        c->iv[c->iv_count++] = (typeof(c->iv[0])){s, e};
-
-    // bubble-sort by start
-    for (int i = 0; i < c->iv_count - 1; i++) {
-        for (int j = i + 1; j < c->iv_count; j++) {
-            if (c->iv[i].start > c->iv[j].start) {
-                typeof(c->iv[0]) tmp = c->iv[i];
-                c->iv[i] = c->iv[j];
-                c->iv[j] = tmp;
-            }
-        }
-    }
-
-    // merge left-to-right
+    // sort and merge
     int write = 0;
-    for (int read = 1; read < c->iv_count; read++) {
-        if (c->iv[write].end >= c->iv[read].start) {
-            // overlap or contiguous: merge
-            if (c->iv[read].end > c->iv[write].end)
-                c->iv[write].end = c->iv[read].end;
+    for(int i=1;i<c->iv_count;i++) {
+        if(c->iv[write].end >= c->iv[i].start) {
+            if(c->iv[i].end > c->iv[write].end) c->iv[write].end = c->iv[i].end;
         } else {
-            // no overlap: advance write
             write++;
-            c->iv[write] = c->iv[read];
+            c->iv[write] = c->iv[i];
         }
     }
-    c->iv_count = write + 1;
+    c->iv_count = write+1;
 }
-
-
 
 static int intervals_cover_full(frag_ctx6_t *c, uint32_t total)
 {
-    if (c->iv_count == 0) return 0;
-
+    if(c->iv_count == 0) return 0;
     uint32_t covered = 0;
-    for (int i = 0; i < c->iv_count; i++) {
-        if (c->iv[i].start > covered) {
-            // gap detected
-            return 0;
-        }
-        if (c->iv[i].end > covered)
-            covered = c->iv[i].end;
+    for(int i=0;i<c->iv_count;i++) {
+        if(c->iv[i].start > covered) return 0;
+        if(c->iv[i].end > covered) covered = c->iv[i].end;
     }
     return (covered >= total);
-}   
+}
 
-// ---------------- API ----------------
-pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr, 
-                          const pkt_view *pv,
-                          uint64_t now)
+// ------------------ Reassembly ------------------
+pkt_view *frag_reass_ipv6(const uint8_t *frag_hdr, const pkt_view *pv, uint64_t now)
 {
-    if (!pv || !frag_hdr) return NULL;
+    if(!pv || !frag_hdr) return NULL;
 
     const struct rte_ipv6_hdr *ip6 = (const struct rte_ipv6_hdr *)pv->data;
     const struct rte_ipv6_frag_hdr *fh = (const struct rte_ipv6_frag_hdr *)frag_hdr;
 
     uint32_t frag_id = rte_be_to_cpu_32(fh->identification);
-    uint16_t raw_off = rte_be_to_cpu_16(fh->fragment_offset); // fragment_offset field in header
-    uint32_t off = (raw_off & 0xFFF8);           // offset in bytes
-    int more_frags = (raw_off & 0x1);
+    uint16_t raw_off = rte_be_to_cpu_16(fh->fragment_offset);
+    uint32_t off = raw_off & 0xFFF8;
+    int more_frags = raw_off & 0x1;
 
     uint32_t copy_len = pv->len - sizeof(*ip6) - sizeof(*fh);
     uint32_t end = off + copy_len;
 
-    DEBUG_LOG(DBG_IPFRAG, "IPv6 frag: id=%x, offset=%u, len=%u, mf=%d, end=%d\n",
-           frag_id, off, copy_len, more_frags, end);
+    global_stats.ipv6_frag_received++;
+    uint64_t now_ns = tsc_to_ns(now);
 
-
-    frag_ctx6_t *c = find_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr, frag_id, ip6->proto);
-    if (!c) {
-        c = alloc_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr, frag_id, ip6->proto, now);
-        if (!c) {
-
-            DEBUG_LOG(DBG_IPFRAG, "Failed to allocate frag_ctx6 for id=%u\n", frag_id);
-
-            return NULL;
-        }
+    frag_ctx6_t *c = find_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr,
+                               frag_id, ip6->proto);
+    if(!c) {
+        c = alloc_ctx6((struct in6_addr *)&ip6->src_addr, (struct in6_addr *)&ip6->dst_addr,
+                       frag_id, ip6->proto, now_ns);
+        if(!c) { global_stats.ipv6_frag_drops++; return NULL; }
     }
 
-    c->ts_last = now;
+    c->ts_last = now_ns;
+    if(!ensure_payload_cap(c, end)) return NULL;
 
-    if (!ensure_payload_cap(c, end)) {
-
-        DEBUG_LOG(DBG_IPFRAG, "Failed to ensure payload capacity for id=%u\n", frag_id);
-
-        free(c->payload);
-        memset(c, 0, sizeof(*c));
-        return NULL;
-    }
-
-    if (copy_len > 0)
+    if(copy_len > 0)
         memcpy(c->payload + off, (uint8_t*)frag_hdr + sizeof(*fh), copy_len);
 
     intervals_add_merge(c, off, end);
 
-    if (!more_frags) {
+    if(!more_frags) {
         c->saw_last = 1;
-        if (c->total_len < end) 
-            c->total_len = end;  // track largest end
-
-        DEBUG_LOG(DBG_IPFRAG, "Saw last fragment for id=%u, total_len=%u\n", frag_id, c->total_len);
-
+        if(c->total_len < end) c->total_len = end;
     }
 
-    // Check full reassembly using tracked total_len
-    if (c->saw_last && intervals_cover_full(c, c->total_len)) {
+    if(c->saw_last && intervals_cover_full(c, c->total_len)) {
         pkt_view *full = capture_alloc(sizeof(*ip6) + c->total_len);
-        if (!full) return NULL;
+        if(!full) return NULL;
 
         memcpy((uint8_t*)full->data, ip6, sizeof(*ip6));
         memcpy((uint8_t*)full->data + sizeof(*ip6), c->payload, c->total_len);
         full->len = sizeof(*ip6) + c->total_len;
 
-        PARSER_LOG_LAYER("IPv6-FRAG", COLOR_IP_FRAG, "IPv6 reassembled (id=%u) total_len=%u\n", frag_id, full->len);
-
-        free(c->payload);
-        memset(c, 0, sizeof(*c));
+        global_stats.ipv6_frag_reassembled++;
+        free_ctx6(c);
         return full;
     }
 
-    PARSER_LOG_LAYER("IPv6-FRAG", COLOR_IP_FRAG, "IPv6 fragment buffered (id=%u) offset=%u len=%u\n",
-           frag_id, off, copy_len);
-
     return NULL;
-}
-
-/* Flush all still-incomplete IPv6 fragment contexts. Call at program shutdown. */
-void frag_ipv6_flush_all(void)
-{
-    for (int i = 0; i < MAX_FRAG_CTX; i++) {
-        frag_ctx6_t *c = &table[i];
-        if (c->payload) {
-
-            char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
-            inet_ntop(AF_INET6, &c->src, src, sizeof(src));
-            inet_ntop(AF_INET6, &c->dst, dst, sizeof(dst));
-            DEBUG_LOG(DBG_IPFRAG, "Flushing incomplete IPv6 frag id=%u %s → %s\n",
-                   c->id, src, dst);
-
-            free(c->payload);
-            memset(c, 0, sizeof(*c));
-        }
-    }
 }

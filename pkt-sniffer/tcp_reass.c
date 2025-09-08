@@ -44,6 +44,23 @@ typedef pthread_mutex_t flow_lock_t;
 #define TCP_PER_FLOW_CAP_BYTES (1024*1024) /* 1 MiB per direction */
 #endif
 
+#define POOL_SIZE_SEGMENTS 65536      // 64k preallocated segments
+#define SEG_DATA_MAX_LEN   2048       // max payload per segment
+
+typedef struct tcp_seg_pool_s {
+    tcp_seg_t segs[POOL_SIZE_SEGMENTS];
+    uint8_t  data[POOL_SIZE_SEGMENTS][SEG_DATA_MAX_LEN];
+    atomic_uint free_head;           // index of first free segment
+    uint32_t next[POOL_SIZE_SEGMENTS]; // linked list of free segments
+} tcp_seg_pool_t;
+
+static tcp_seg_pool_t tcp_seg_pool;
+
+// Stats
+atomic_ulong tcp_segments_in_use;
+atomic_ulong tcp_segments_bytes;
+atomic_ulong tcp_seg_pool_exhausted;
+
 /* ---------- Internal tcp_flow definition (opaque externally) ---------- */
 struct tcp_flow {
     char src_ip[64];
@@ -94,6 +111,22 @@ void        tcp_flow_set_l7_proto(tcp_flow_t *flow, int l7_proto) {
 }
 
 // -------- Helpers --------
+
+static void tcp_seg_pool_init(void) {
+    for (uint32_t i = 0; i < POOL_SIZE_SEGMENTS; i++) {
+        tcp_seg_pool.next[i] = i + 1;
+        tcp_seg_pool.segs[i].data = tcp_seg_pool.data[i];
+        tcp_seg_pool.segs[i].len = 0;
+        tcp_seg_pool.segs[i].next = NULL;
+    }
+    tcp_seg_pool.next[POOL_SIZE_SEGMENTS - 1] = UINT32_MAX; // end of list
+    atomic_store(&tcp_seg_pool.free_head, 0);
+
+    atomic_store(&tcp_segments_in_use, 0);
+    atomic_store(&tcp_segments_bytes, 0);
+    atomic_store(&tcp_seg_pool_exhausted, 0);
+}
+
 static inline uint32_t flow_hash(const char *saddr, const char *daddr,
                                  uint16_t sport, uint16_t dport) {
     uint32_t h = 5381;
@@ -114,20 +147,42 @@ static inline int seq_gt(uint32_t a, uint32_t b) {
 
 // -------- Segment handling --------
 static tcp_seg_t *seg_new(const uint8_t *data, uint32_t len, uint32_t seq, time_t ts) {
-    tcp_seg_t *s = calloc(1, sizeof(*s));
-    if (!s) return NULL;
-    s->seq = seq;
-    s->len = len;
-    s->ts  = ts;
-    s->next = NULL;
-    if (len > 0) {
-        s->data = malloc(len);
-        if (!s->data) { free(s); return NULL; }
-        memcpy(s->data, data, len);
-    } else {
-        s->data = NULL;
+    uint32_t idx = atomic_load(&tcp_seg_pool.free_head);
+    while (idx != UINT32_MAX) {
+        uint32_t next_idx = tcp_seg_pool.next[idx];
+        if (atomic_compare_exchange_weak(&tcp_seg_pool.free_head, &idx, next_idx)) {
+            tcp_seg_t *s = &tcp_seg_pool.segs[idx];
+            s->seq = seq;
+            s->len = (len > SEG_DATA_MAX_LEN) ? SEG_DATA_MAX_LEN : len;
+            s->ts  = ts;
+            s->next = NULL;
+            if (data && s->len > 0) memcpy(s->data, data, s->len);
+
+            atomic_fetch_add(&tcp_segments_in_use, 1);
+            atomic_fetch_add(&tcp_segments_bytes, s->len);
+            return s;
+        }
+        idx = atomic_load(&tcp_seg_pool.free_head);
     }
-    return s;
+    // pool exhausted
+    atomic_fetch_add(&tcp_seg_pool_exhausted, 1);
+    return NULL;
+}
+
+static void seg_free(tcp_seg_t *s) {
+    if (!s) return;
+
+    uint32_t idx = s - tcp_seg_pool.segs;
+    atomic_fetch_sub(&tcp_segments_in_use, 1);
+    atomic_fetch_sub(&tcp_segments_bytes, s->len);
+    s->len = 0;
+    s->next = NULL;
+
+    uint32_t head;
+    do {
+        head = atomic_load(&tcp_seg_pool.free_head);
+        tcp_seg_pool.next[idx] = head;
+    } while (!atomic_compare_exchange_weak(&tcp_seg_pool.free_head, &head, idx));
 }
 
 // Insert segment in sorted order, trimming overlaps
@@ -151,7 +206,7 @@ static int insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
             uint32_t ov = prev_end - s->seq;
             if (ov >= s->len) {
                 DEBUG_LOG(DBG_TCP_REASS,"Dropped fully duplicate segment at seq=%u len=%u", s->seq, s->len);
-                free(s->data); free(s); return 0;
+                seg_free(s); return 0;
             }
             DEBUG_LOG(DBG_TCP_REASS,"Trimmed %u bytes overlap with previous (seq=%u)", ov, s->seq);
             memmove(s->data, s->data + ov, s->len - ov);
@@ -167,7 +222,8 @@ static int insert_seg_sorted(tcp_seg_t **head, tcp_seg_t *s) {
             uint32_t ov = (s->seq + s->len) - cur_start;
             if (ov >= s->len) {
                 DEBUG_LOG(DBG_TCP_REASS,"Dropped segment fully overlapped by next at seq=%u len=%u", s->seq, s->len);
-                free(s->data); free(s); return 0;  // --> REASON FOR CRASH
+                seg_free(s); 
+                return 0;
             }
             DEBUG_LOG(DBG_TCP_REASS,"Trimmed %u bytes overlap with next (seq=%u)", ov, s->seq);
             s->len -= ov;
@@ -218,8 +274,7 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
                             h->seq, h->len, dir);
                 stats_tcp_duplicate();
                 *head = h->next;
-                free(h->data);
-                free(h);
+                seg_free(h);
                 continue;
             }
             stats_tcp_overlap();
@@ -252,8 +307,7 @@ static void try_deliver(tcp_flow_t *f, tcp_seg_t **head, uint32_t *next_expected
 
         // Remove from list
         *head = h->next;
-        free(h->data);
-        free(h);
+        seg_free(h);
     }
 }
 
@@ -314,8 +368,8 @@ static tcp_flow_t *flow_create(const char *src, const char *dst,
 static void flow_free(tcp_flow_t *f) {
     if (!f) return;
     tcp_seg_t *s, *n;
-    for (s = f->s2d_head; s; s = n) { n = s->next; free(s->data); free(s); }
-    for (s = f->d2s_head; s; s = n) { n = s->next; free(s->data); free(s); }
+    for (s = f->s2d_head; s; s = n) { n = s->next; seg_free(s); }
+    for (s = f->d2s_head; s; s = n) { n = s->next; seg_free(s); }
 
     /* destroy per-flow lock (safe only if no one else holds it) */
     flow_lock_destroy(&f->lock);
@@ -345,6 +399,7 @@ int tcp_reass_init(void) {
         flow_lock_init(&bucket_locks[i]);
     }
 
+    tcp_seg_pool_init();
     DEBUG_LOG(DBG_TCP_REASS,"TCP reassembly initialized");
     return 0;
 }
@@ -499,7 +554,7 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
             while (*pp && *pp != seg) pp = &(*pp)->next;
             if (*pp == seg) {
                 *pp = seg->next;
-                free(seg->data); free(seg);
+                seg_free(seg);
             }
             // reduce counter conservatively (we dropped seg->len)
             if (f->s2d_bytes_buf >= seg->len) f->s2d_bytes_buf -= seg->len;
@@ -529,7 +584,7 @@ void tcp_reass_process_segment(const char *src_ip, const char *dst_ip,
             while (*pp && *pp != seg) pp = &(*pp)->next;
             if (*pp == seg) {
                 *pp = seg->next;
-                free(seg->data); free(seg);
+                seg_free(seg);
             }
             if (f->d2s_bytes_buf >= seg->len) f->d2s_bytes_buf -= seg->len;
             else f->d2s_bytes_buf = 0;

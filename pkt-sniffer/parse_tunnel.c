@@ -51,6 +51,9 @@ int parse_tunnel(pkt_view *outer)
         inner->len  = len - gre_hdr_len;
         inner->kind = PV_KIND_HEAP;
 
+        // --- Stamp timestamp from outer packet ---
+        inner->ts_ns = outer->ts_ns;
+
         outer->inner_pkt = inner;
         outer->is_tunnel = 1;
 
@@ -76,6 +79,9 @@ int parse_tunnel(pkt_view *outer)
             inner->len  = payload_len - 8;
             inner->kind = PV_KIND_HEAP;
 
+            // --- Stamp timestamp from outer packet ---
+            inner->ts_ns = outer->ts_ns;
+
             outer->inner_pkt = inner;
             outer->is_tunnel = 1;
 
@@ -98,6 +104,9 @@ int parse_tunnel(pkt_view *outer)
             inner->len  = payload_len - 8 - opt_len;
             inner->kind = PV_KIND_HEAP;
 
+            // --- Stamp timestamp from outer packet ---
+            inner->ts_ns = outer->ts_ns;
+            
             outer->inner_pkt = inner;
             outer->is_tunnel = 1;
 

@@ -7,16 +7,7 @@
 #include "tunnel_types.h"
 #include "debug.h"
 
-#ifndef DPDK_DEBUG
-#define DPDK_DEBUG    0
-#endif
-
-#if DPDK_DEBUG
-#define DPDK_DEBUG_PRINT(fmt, ...) \
-    fprintf(stderr, "[DPDK][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
-#else
-#define DPDK_DEBUG_PRINT(fmt, ...) do {} while (0)
-#endif
+extern int capture_port;
 
 typedef enum {
     PV_KIND_STACK = 0,  // borrowed (owned by backend, e.g., static recv buffer)
@@ -26,26 +17,28 @@ typedef enum {
 } pv_kind_t;
 
 typedef struct pkt_view {
-    const uint8_t   *data;     // pointer to contiguous L2/L3 data
-    uint16_t   len;      // valid length
-    bool       is_reassembled;
-    char     src_ip[64];
-    char     dst_ip[64];
-    char     src_mac[32];   // NEW
-    char     dst_mac[32];   // NEW
-    uint16_t src_port;
-    uint16_t dst_port;
-    uint8_t l4_proto;        // e.g. IPPROTO_TCP, UDP, ICMP
-    int l3_proto;            // AF_INET, AF_INET6, ETH_P_ARP
-    pv_kind_t  kind;     // how to free
-    void      *backing;  // heap ptr or rte_mbuf*
+    const uint8_t   *data;
+    uint16_t        len;
+    bool            is_reassembled;
+    char            src_ip[64];
+    char            dst_ip[64];
+    char            src_mac[32];
+    char            dst_mac[32];
+    uint16_t        src_port;
+    uint16_t        dst_port;
+    uint8_t         l4_proto;
+    int             l3_proto;
+    pv_kind_t       kind;
+    void            *backing;
 
     // --- Tunnel metadata ---
-    tunnel_info tunnel;   // holds GRE/VXLAN/GENEVE info
-    uint8_t is_tunnel;    // 1 if this pkt contains tunnel info
-    uint8_t tunnel_counted; // for stats
-    // --- Optional: recursive inner pkt view ---
-    struct pkt_view *inner_pkt;   // points to inner pkt_view if tunneled
+    tunnel_info     tunnel;
+    uint8_t         is_tunnel;
+    uint8_t         tunnel_counted;
+    struct pkt_view *inner_pkt;
+
+    // --- New field for latency ---
+    uint64_t        ts_ns;      // timestamp in nanoseconds
 } pkt_view;
 
 // Backend lifecycle

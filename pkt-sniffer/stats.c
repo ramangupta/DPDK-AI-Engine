@@ -12,6 +12,11 @@
 #include <math.h>
 #include "stats_json.h"
 #include "sniffer_proto.h"
+#include <sys/time.h>
+#include "filter.h"
+#include "tsc.h"
+#include <rte_ethdev.h>
+#include "frag_ipv4.h"
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
@@ -37,6 +42,9 @@ static int http_session_count = 0;
 
 proto_stats_t proto_stats[MAX_PROTO] = {0};
 tunnel_stats_t tunnel_stats = {0};
+
+perf_stats_t perf_stats = {0};
+
 
 // ------------------- TCP Reassembly Stats -------------------
 void stats_tcp_segment(uint16_t pktlen) {
@@ -417,19 +425,21 @@ void stats_report_tls(void)
     }
 }
 
-void stats_poll(uint64_t now_tsc) {
+void stats_poll(void) {
     static uint64_t last_report = 0;
     static uint64_t last_maint  = 0;
+
+    uint64_t curr_tsc = now_tsc();  // call the function
     uint64_t now_sec;
     uint64_t now_ns;
 
 #ifdef USE_DPDK
     uint64_t hz = rte_get_tsc_hz();
-    now_sec = now_tsc / hz;
-    now_ns  = (now_tsc * 1000000000ULL) / hz;  // convert cycles → ns
+    now_sec = curr_tsc / hz;
+    now_ns  = (curr_tsc * 1000000000ULL) / hz;
 #else
-    now_sec = now_tsc / 1000000000ULL;  // convert ns → sec
-    now_ns  = now_tsc;                  // already ns
+    now_sec = curr_tsc / 1000000000ULL;
+    now_ns  = curr_tsc;
 #endif
 
     if (last_report == 0) {
@@ -438,20 +448,47 @@ void stats_poll(uint64_t now_tsc) {
         return;
     }
 
-    if (now_sec - last_report >= REPORT_INTERVAL) {
-        stats_report();
+   if (now_sec - last_report >= REPORT_INTERVAL) {
+
+#ifdef USE_DPDK
+        if (capture_port >= 0) {
+            struct rte_eth_stats eth_stats;
+            if (rte_eth_stats_get(capture_port, &eth_stats) == 0) {
+                global_stats.dropped_hw = eth_stats.ierrors + eth_stats.rx_nombuf;
+            }
+        }
+#endif
+
+        struct timespec start_ts, end_ts;
+        clock_gettime(CLOCK_MONOTONIC, &start_ts);
+        // Periodic JSON/machine output
+        write_stats_json();
+
+        clock_gettime(CLOCK_MONOTONIC, &end_ts);
+
+        // Update cumulative stats write time (ns)
+        perf_stats.stats_write_ns +=
+            (end_ts.tv_sec - start_ts.tv_sec) * 1e9 + (end_ts.tv_nsec - start_ts.tv_nsec);
+        // Optional console summary
+        if (g_filters.console_stats) {
+            stats_report();   // prints human-readable summary
+        }
+
         last_report = now_sec;
     }
 
     if (now_sec - last_maint >= 1) {
-        // TCP reassembly maintenance can stay on seconds
         tcp_reass_periodic_maintenance(now_sec);
-        // Expire old flows (pass nanoseconds!)
         flow_expire(now_ns);
         dns_expire(now_ns);
+
+        // --- Flush stale IPv4/IPv6 fragments ---
+        frag_ipv4_flush_stale(now_ns);
+        frag_ipv6_flush_stale(now_ns);
         last_maint = now_sec;
     }
 }
+
 
 static void format_bytes(uint64_t bytes, char *buf, size_t buflen) {
     if (bytes > (1024ULL * 1024 * 1024))
@@ -510,7 +547,6 @@ void stats_tunnel_report(void)
 
 void stats_report(void) 
 {
-    write_stats_json();
 
     uint64_t pkt_sum = global_stats.ipv4 + global_stats.ipv6 +
                        global_stats.tcp + global_stats.udp +
@@ -650,4 +686,160 @@ void stats_report(void)
     talkers_sort_mode = SORT_BY_PKTS; 
     talkers_report();
     talkers_reset();
+
+}
+
+void perf_init(void) {
+    memset(&perf_stats, 0, sizeof(perf_stats));
+}
+
+void perf_start(void) {
+    gettimeofday(&perf_stats.start_time, NULL);
+}
+
+void perf_stop(void) {
+    gettimeofday(&perf_stats.end_time, NULL);
+
+    double start = perf_stats.start_time.tv_sec +
+                   perf_stats.start_time.tv_usec / 1e6;
+    double end   = perf_stats.end_time.tv_sec +
+                   perf_stats.end_time.tv_usec / 1e6;
+
+    perf_stats.runtime_sec = (end - start);
+
+    if (perf_stats.runtime_sec > 0) {
+        perf_stats.pps  = perf_stats.total_pkts / perf_stats.runtime_sec;
+        perf_stats.bps  = perf_stats.total_bytes / perf_stats.runtime_sec;
+        perf_stats.mbps = (perf_stats.bps * 8) / 1e6;
+    }
+}
+
+void perf_update(uint16_t pktlen, uint64_t pkt_ns) {
+    perf_stats.total_pkts++;
+    perf_stats.total_bytes += pktlen;
+
+    // Update min/max latency if pkt_ns is valid
+    if (pkt_ns > 0) {
+        perf_stats.latency_samples++;
+        if (pkt_ns < perf_stats.latency_min_ns || perf_stats.latency_samples == 1)
+            perf_stats.latency_min_ns = pkt_ns;
+        if (pkt_ns > perf_stats.latency_max_ns)
+            perf_stats.latency_max_ns = pkt_ns;
+        perf_stats.latency_sum_ns += pkt_ns;
+    }
+}
+
+void stats_report_final(void) {
+    char start_buf[64], end_buf[64];
+    struct tm tm_info;
+
+    // Format start/end times
+    localtime_r(&perf_stats.start_time.tv_sec, &tm_info);
+    strftime(start_buf, sizeof(start_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
+    localtime_r(&perf_stats.end_time.tv_sec, &tm_info);
+    strftime(end_buf, sizeof(end_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
+
+    printf("\n==== Final Performance Report ====\n");
+    printf("Capture Start       : %s\n", start_buf);
+    printf("Capture End         : %s\n", end_buf);
+    printf("Duration (sec)      : %.3f\n", perf_stats.runtime_sec);
+
+    // --- Traffic Totals ---
+    printf("\n--- Traffic Totals ---\n");
+    printf("Total Packets       : %lu\n", perf_stats.total_pkts);
+    printf("Total Bytes         : %lu\n", perf_stats.total_bytes);
+    printf("Throughput (pps)    : %.2f\n", perf_stats.pps);
+    printf("Throughput (Mbps)   : %.2f\n", perf_stats.mbps);
+
+    // Per-protocol throughput
+    // printf("IPv4 Throughput (Mbps) : %.2f\n", global_stats.ipv4_bytes * 8.0 / perf_stats.runtime_sec / 1e6);
+    // printf("IPv6 Throughput (Mbps) : %.2f\n", global_stats.ipv6_bytes * 8.0 / perf_stats.runtime_sec / 1e6);
+    printf("TCP PPS                : %.2f\n", global_stats.tcp / perf_stats.runtime_sec);
+    printf("UDP PPS                : %.2f\n", global_stats.udp / perf_stats.runtime_sec);
+
+    // --- Protocol Counters ---
+    printf("\n--- Protocol Counters ---\n");
+    printf("IPv4 Packets        : %lu\n", global_stats.ipv4);
+    printf("IPv6 Packets        : %lu\n", global_stats.ipv6);
+    printf("TCP Packets         : %lu\n", global_stats.tcp);
+    printf("UDP Packets         : %lu\n", global_stats.udp);
+    printf("ICMP Packets        : %lu\n", global_stats.icmp);
+    printf("DNS Packets         : %lu\n", global_stats.dns);
+    printf("ARP Packets         : %lu\n", global_stats.arp);
+    printf("TLS Handshake       : %lu\n", global_stats.tls_handshake);
+    printf("TLS AppData         : %lu\n", global_stats.tls_appdata);
+    printf("HTTP Packets        : %lu\n", global_stats.http);
+
+    // IPv4 Fragmentation
+    printf("\n--- IPv4 Fragmentation ---\n");
+    printf("Contexts Allocated          : %lu\n", global_stats.ipv4_frag_allocs);
+    printf("Fragments Received          : %lu\n", global_stats.ipv4_frag_received);
+    printf("Successfully Reassembled    : %lu\n", global_stats.ipv4_frag_reassembled);
+    printf("Payload Expansions          : %lu\n", global_stats.ipv4_frag_expands);
+    printf("Drops (alloc/realloc)       : %lu\n", global_stats.ipv4_frag_drops);
+    printf("Stale Timeouts              : %lu\n", global_stats.ipv4_frag_timeouts);
+    printf("Flushed at Shutdown         : %lu\n", global_stats.ipv4_frag_flushes);
+
+    // IPv6 Fragmentation
+    printf("\n--- IPv6 Fragmentation ---\n");
+    printf("Contexts Allocated          : %lu\n", global_stats.ipv6_frag_allocs);
+    printf("Fragments Received          : %lu\n", global_stats.ipv6_frag_received);
+    printf("Successfully Reassembled    : %lu\n", global_stats.ipv6_frag_reassembled);
+    printf("Payload Expansions          : %lu\n", global_stats.ipv6_frag_expands);
+    printf("Drops (alloc/realloc)       : %lu\n", global_stats.ipv6_frag_drops);
+    printf("Stale Timeouts              : %lu\n", global_stats.ipv6_frag_timeouts);
+    printf("Flushed at Shutdown         : %lu\n", global_stats.ipv6_frag_flushes);
+
+    // --- TCP Reassembly ---
+    printf("\n--- TCP Reassembly ---\n");
+    printf("Segments            : %lu\n", global_stats.tcp_segments);
+    printf("Bytes Reassembled   : %lu\n", global_stats.tcp_bytes);
+    printf("Duplicates          : %lu (%.2f%%)\n", global_stats.tcp_duplicates,
+           (double)global_stats.tcp_duplicates / global_stats.tcp_segments * 100.0);
+    printf("Overlaps            : %lu\n", global_stats.tcp_overlaps);
+    printf("Out-of-Order        : %lu (%.2f%%)\n", global_stats.tcp_out_of_order,
+           (double)global_stats.tcp_out_of_order / global_stats.tcp_segments * 100.0);
+
+    printf("\n--- TCP Segment Pool ---\n");
+    printf("Segments in use       : %lu\n", atomic_load(&tcp_segments_in_use));
+    printf("Segment bytes         : %lu\n", atomic_load(&tcp_segments_bytes));
+    printf("Pool exhausted count  : %lu\n", atomic_load(&tcp_seg_pool_exhausted));
+
+    // --- Latency ---
+    if (perf_stats.latency_samples > 0) {
+        double avg_ms = (double)perf_stats.latency_sum_ns / perf_stats.latency_samples / 1e6;
+        printf("\n--- Latency (ms) ---\n");
+        printf("Latency (ms)    : min %.3f, max %.3f, avg %.3f\n",
+               perf_stats.latency_min_ns / 1e6,
+               perf_stats.latency_max_ns / 1e6,
+               avg_ms);
+        printf("Samples             : %lu\n", perf_stats.latency_samples);
+    }
+
+    // --- Stats Reporting / Overhead ---
+    printf("\n--- Stats Overhead ---\n");
+    printf("Stats write time (ms) : %.3f\n", perf_stats.stats_write_ns / 1e6);
+
+    printf("\n--- Drops / Errors ---\n");
+    printf("Dropped Packets (HW)   : %lu\n", global_stats.dropped_hw);
+    printf("Dropped Packets (App)  : %lu\n", global_stats.dropped);
+    printf("   Truncated Ethernet  : %lu\n", global_stats.drop_truncated_eth);
+    printf("   Invalid Ethertype   : %lu\n", global_stats.drop_invalid_ethertype);
+    printf("   Invalid IPv4        : %lu\n", global_stats.drop_invalid_ipv4);
+    printf("   Invalid IPv6        : %lu\n", global_stats.drop_invalid_ipv6);
+    printf("   Invalid L4          : %lu\n", global_stats.drop_invalid_l4);
+    printf("   UDP Truncated       : %lu\n", global_stats.drop_truncated_udp);
+    printf("   TCP Truncated       : %lu\n", global_stats.drop_truncated_tcp);
+    printf("   TCP Bad Header      : %lu\n", global_stats.drop_bad_header_tcp); 
+    printf("   Non UDP/TCP pkt     : %lu\n", global_stats.drop_non_udp_tcp);   
+    printf("   Unknown L7          : %lu\n", global_stats.drop_unknown_l7);
+    printf("   Invalid Tunnel      : %lu\n", global_stats.drop_invalid_tunnel);
+    printf("   Invalid DNS         : %lu\n", global_stats.drop_invalid_dns);
+    printf("   Bad Checksums       : %lu\n", global_stats.drop_checksum);
+    printf("   Filter Miss         : %lu\n", global_stats.drop_filter_miss);
+    printf("   Other               : %lu\n", global_stats.drop_other);
+    printf("Dropped TCP Segments   : %lu\n", global_stats.tcp_seg_dropped);
+
+
+    printf("=================================\n");
 }

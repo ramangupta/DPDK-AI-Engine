@@ -7,6 +7,8 @@
 #endif
 #include "capture.h"
 
+int capture_port = -1;
+
 // malloc + copy (frag reassembly etc.)
 pkt_view *capture_alloc(size_t len) {
     pkt_view *pv = malloc(sizeof(pkt_view));
@@ -43,11 +45,10 @@ pkt_view *capture_wrap(const uint8_t *data, size_t len) {
 void capture_free(pkt_view *pv) {
     if (!pv) return;
 
-    DPDK_DEBUG_PRINT(
-        "capture_free: pv=%p kind=%d data=%p len=%u inner_pkt=%p\n",
+    DEBUG_LOG(
+        DBG_DPDK, "capture_free: pv=%p kind=%d data=%p len=%u inner_pkt=%p\n",
         (void*)pv, pv->kind, (void*)pv->data, (unsigned)pv->len,
-        (void*)pv->inner_pkt
-    );
+        (void*)pv->inner_pkt);
 
     // Recursively free any inner packet
     if (pv->inner_pkt) {

@@ -104,6 +104,8 @@ static inline void parse_dhcp_options(const uint8_t *opt, size_t len) {
 void handle_dhcp(pkt_view *pv) {
     if (pv->len < sizeof(struct bootp_hdr)) {
         DEBUG_LOG(DBG_DHCP, "    DHCP <truncated>");
+        global_stats.drop_invalid_ipv4++;
+        global_stats.dropped++;
         return;
     }
 

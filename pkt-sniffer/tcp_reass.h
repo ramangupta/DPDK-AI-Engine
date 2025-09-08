@@ -5,9 +5,14 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #define TCP_REASS_HASH_BUCKETS       4096
 #define TCP_REASS_FLOW_TIMEOUT_SEC   120
+
+extern atomic_ulong tcp_segments_in_use;       // current segments in use
+extern atomic_ulong tcp_segments_bytes;        // total payload bytes in use
+extern atomic_ulong tcp_seg_pool_exhausted;   // count of dropped segments due to pool exhaustion
 
 /* Opaque tcp_flow type exposed to callers */
 typedef struct tcp_flow tcp_flow_t;

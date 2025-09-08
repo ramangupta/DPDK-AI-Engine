@@ -3,11 +3,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "pcap_writer.h"
+#include "stats.h"
 
 static void handle_sigint(int sig) {
     (void)sig;
-    fprintf(stderr, "\nCaught SIGINT, closing pcap and exiting...\n");
+    perf_stop();
+    stats_report_final();
     pcap_writer_close();
+    fprintf(stderr, "\nCaught SIGINT, closing pcap and exiting...\n");
     exit(0);
 }
 

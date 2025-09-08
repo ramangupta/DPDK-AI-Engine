@@ -81,7 +81,12 @@ struct icmpv6_nd_target {
 } __attribute__((__packed__));
 
 static void parse_icmpv4(const uint8_t *p, uint16_t len) {
-    if (len < sizeof(struct icmpv4_hdr_min)) { printf("      ICMPv4 <truncated>\n"); return; }
+    if (len < sizeof(struct icmpv4_hdr_min)) { 
+        printf("      ICMPv4 <truncated>\n");
+        global_stats.drop_invalid_l4++;
+        global_stats.dropped++;
+        return; 
+    }
     const struct icmpv4_hdr_min *h = (const struct icmpv4_hdr_min*)p;
     PARSER_LOG_LAYER("ICMP", COLOR_ICMP, "      ICMPv4 type=%u(%s) code=%u", 
                      h->type, icmpv4_type_name(h->type), h->code);
@@ -106,7 +111,12 @@ static void parse_icmpv4(const uint8_t *p, uint16_t len) {
 }
 
 static void parse_icmpv6(const uint8_t *p, uint16_t len) {
-    if (len < sizeof(struct icmpv6_hdr_min)) { printf("      ICMPv6 <truncated>"); return; }
+    if (len < sizeof(struct icmpv6_hdr_min)) { 
+        printf("      ICMPv6 <truncated>"); 
+        global_stats.drop_invalid_l4++;
+        global_stats.dropped++;
+        return; 
+    }
     const struct icmpv6_hdr_min *h = (const struct icmpv6_hdr_min*)p;
     PARSER_LOG_LAYER("ICMPv6", COLOR_ICMP, "      ICMPv6 type=%u code=%u", h->type, h->code);
 
@@ -216,6 +226,8 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
             parse_http(&app_pv);
         } else {
             PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Unrecognized L7 payload (not HTTP/TLS)\n");
+            global_stats.drop_unknown_l7++;
+            global_stats.dropped++;
         }
     } else if (l7_proto == 1) {
         DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to HTTP parser\n");
@@ -236,7 +248,9 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
         stats_update(PROTO_UDP, pv_slice->len);
         if (pv_slice->len < sizeof(struct rte_udp_hdr)) 
         { 
-            DEBUG_LOG(DBG_UDP,"      UDP <truncated>\n"); 
+            DEBUG_LOG(DBG_UDP,"      UDP <truncated>\n");
+            global_stats.drop_truncated_udp++;
+            global_stats.dropped++; 
             return; 
         }
         const struct rte_udp_hdr *uh = (const struct rte_udp_hdr*)pv_slice->data;
@@ -278,12 +292,16 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
         stats_update(PROTO_TCP, pv_slice->len);
         if (pv_slice->len < sizeof(struct rte_tcp_hdr)) { 
             DEBUG_LOG(DBG_TCP,"      TCP <truncated>\n"); 
+            global_stats.drop_truncated_tcp++;
+            global_stats.dropped++;
             return; 
         }
         const struct rte_tcp_hdr *th = (const struct rte_tcp_hdr*)pv_slice->data;
         uint8_t hlen = (th->data_off >> 4) * 4;
         if (hlen < sizeof(struct rte_tcp_hdr) || hlen > pv_slice->len) {
             DEBUG_LOG(DBG_TCP,"      TCP <bad header len>\n");
+            global_stats.drop_bad_header_tcp++;
+            global_stats.dropped++;
             return;
         }
         PARSER_LOG_LAYER("TCP", COLOR_TCP,
@@ -336,6 +354,10 @@ void parse_l4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
         parse_icmpv6(pv_slice->data, pv_slice->len);
 
     } else {
-        DEBUG_LOG(DBG_L4,"      L4 proto=%u (not decoded)\n", pv_slice->l4_proto);
+        DEBUG_LOG(DBG_L4, "      L4 proto=%u (not decoded)\n", pv_slice->l4_proto);
+        if (pv_slice->l4_proto != IPPROTO_FRAGMENT) { 
+        global_stats.drop_non_udp_tcp++;
+        global_stats.dropped++;
+        }
     }
 }

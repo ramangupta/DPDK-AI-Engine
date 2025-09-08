@@ -50,6 +50,8 @@ typedef struct {
     bool write_pcap;
     char write_file[256];
 
+    bool console_stats;
+
 } filter_opts_t;
 
 extern filter_opts_t g_filters;

@@ -8,7 +8,6 @@
 // ---------------- Config ----------------
 #define MAX_FRAG_CTX   64
 #define MAX_INTERVALS  64
-#define FRAG_TIMEOUT   5000000000ULL // ~5s in TSC
 
 // -------------- Interval set -----------
 typedef struct {
@@ -41,6 +40,18 @@ typedef struct {
 static frag_ctx_t table[MAX_FRAG_CTX];
 
 // ----------------- helpers --------------
+
+static inline uint64_t tsc_to_ns(uint64_t tsc)
+{
+#ifdef USE_DPDK
+    uint64_t hz = rte_get_tsc_hz();
+    return (tsc * 1000000000ULL) / hz;
+#else
+    // on non-DPDK builds now_tsc() already returns ns
+    return tsc;
+#endif
+}
+
 static void report_ipv4_drop(uint16_t id, const char *reason) {
     // stdout so the harness always sees it (stderr still has DLOGs)
     PARSER_LOG_LAYER("IP-FRAG", COLOR_IP_FRAG, "IPv4 drop (id=%u reason=%s)\n", id, reason);
@@ -63,13 +74,13 @@ static inline frag_ctx_t* find_ctx(uint32_t src, uint32_t dst,
 
 static inline frag_ctx_t* alloc_ctx(uint32_t src, uint32_t dst,
                                     uint16_t id, uint8_t proto,
-                                    uint64_t now)
+                                    uint64_t now_ns)
 {
     // Reclaim stale and log drop
     for (int i=0;i<MAX_FRAG_CTX;i++) {
         frag_ctx_t *c = &table[i];
         if (c->in_use) {
-            if ((now - c->ts_last) > FRAG_TIMEOUT) {
+            if ((now_ns - c->ts_last) > FRAG_V4_TIMEOUT_NS) {
                 report_ipv4_drop(c->id, "timeout");
                 DEBUG_LOG(DBG_IPFRAG, "id=%u timed out -> drop", c->id);
                 free(c->payload);
@@ -84,7 +95,8 @@ static inline frag_ctx_t* alloc_ctx(uint32_t src, uint32_t dst,
             memset(c,0,sizeof(*c));
             c->in_use = 1;
             c->src = src; c->dst = dst; c->id = id; c->proto = proto;
-            c->ts_last = now;                    // keep ts for GC
+            c->ts_last = now_ns;                    // keep ts for GC
+            global_stats.ipv4_frag_allocs++;
             return c;
         }
     }
@@ -165,15 +177,27 @@ static int intervals_cover_full(const frag_ctx_t *c, uint32_t need)
 
 static int ensure_payload_cap(frag_ctx_t *c, uint32_t cap)
 {
-    if (c->payload_cap >= cap) return 1;
+    if (c->payload_cap >= cap) 
+        return 1;
     uint32_t newcap = c->payload_cap ? c->payload_cap : 2048;
-    while (newcap < cap) newcap *= 2;
+    
+    while (newcap < cap) 
+        newcap *= 2;
+    
     uint8_t *np = realloc(c->payload, newcap);
-    if (!np) return 0;
-    if (newcap > c->payload_cap)
+    if (!np) {
+        global_stats.ipv4_frag_drops++;
+        return 0;
+    }
+    
+    if (newcap > c->payload_cap) {
+        global_stats.ipv4_frag_expands++;
         memset(np + c->payload_cap, 0, newcap - c->payload_cap);
+    }
+
     c->payload = np;
     c->payload_cap = newcap;
+    
     return 1;
 }
 
@@ -198,10 +222,14 @@ pkt_view *frag_reass_ipv4(const struct rte_ipv4_hdr *ip4,
     uint16_t id  = rte_be_to_cpu_16(ip4->packet_id);
     uint8_t  pr  = ip4->next_proto_id;
 
+    global_stats.ipv4_frag_received++;
+
+    uint64_t now_ns = tsc_to_ns(now);
+
     frag_ctx_t *c = find_ctx(src, dst, id, pr);
-    if (!c) c = alloc_ctx(src, dst, id, pr, now);
+    if (!c) c = alloc_ctx(src, dst, id, pr, now_ns);
     if (!c) return NULL;
-    c->ts_last = now;
+    c->ts_last = now_ns;
 
     if (off == 0 && !c->have_first_hdr) {
         if (ihl > sizeof(c->hdr_buf)) ihl = sizeof(c->hdr_buf);
@@ -260,6 +288,7 @@ pkt_view *frag_reass_ipv4(const struct rte_ipv4_hdr *ip4,
         // compute checksum over header length we captured
         out->hdr_checksum    = ip_checksum(out, hdr_len);
 
+        global_stats.ipv4_frag_reassembled++;
         full->len = (uint16_t)total;
         return full;
 
@@ -277,7 +306,7 @@ void frag_ipv4_gc(uint64_t now)
         frag_ctx_t *c = &table[i];
         if (!c->in_use) continue;
 
-        if ((now - c->ts_last) > FRAG_TIMEOUT) {
+        if ((now - c->ts_last) > FRAG_V4_TIMEOUT_NS) {
             // Incomplete assembly timed out
             DEBUG_LOG(DBG_IPFRAG, "IPv4 drop (id=%u reason=timeout)\n", c->id);
             DEBUG_LOG(DBG_IPFRAG, "id=%u timed out -> drop", c->id);
@@ -299,10 +328,31 @@ void frag_ipv4_flush_all(void)
                 DEBUG_LOG(DBG_IPFRAG, "id=%u flushed incomplete -> drop", c->id);
                 report_ipv4_drop(c->id, "incomplete");
             }
+            global_stats.ipv4_frag_timeouts++;
             free(c->payload);
             memset(c, 0, sizeof(*c));
         }
     }
 }
+
+void frag_ipv4_flush_stale(uint64_t now)
+{
+    for (int i = 0; i < MAX_FRAG_CTX; i++) {
+        frag_ctx_t *c = &table[i];
+        if (c->in_use && (now - c->ts_last) > FRAG_V4_TIMEOUT_NS) {
+            if (!(c->saw_last && c->have_first_hdr &&
+                  intervals_cover_full(c, c->total_len))) {
+                // Incomplete → drop
+                DEBUG_LOG(DBG_IPFRAG, "IPv4 frag id=%u stale -> drop", c->id);
+                report_ipv4_drop(c->id, "timeout");
+            }
+            free(c->payload);
+            memset(c, 0, sizeof(*c));
+            global_stats.ipv4_frag_flushes++;
+            global_stats.dropped++;
+        }
+    }
+}
+
 
 

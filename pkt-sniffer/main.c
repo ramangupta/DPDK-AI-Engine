@@ -35,103 +35,108 @@ static inline double now_sec(void) {
 #define DBG_ARP       (1 << 10)
 #define DBG_IPFRAG    (1 << 11)
 
-// Main packet processing loop
-int main(int argc, char **argv) 
-{
-    pkt_view *pv = NULL;
-    filter_pktview_t fpv;
-    uint64_t count = 0;
-    double t_start = now_sec();
 
-#if 0
-    DEBUG_MASK = DBG_PARSER | DBG_ETH | DBG_TCP_REASS | DBG_ARP | DBG_DHCP | DBG_HTTP |
-                 DBG_IP | DBG_IPFRAG | DBG_L4 | DBG_TCP | DBG_UDP | DBG_DNS;
-#endif
+static int app_init(int argc, char **argv) {
 
-    DEBUG_MASK = DBG_PARSER;
-    
     cli_parse(argc, argv);
     setup_signal_handlers();
+    frag_reass_ipv6_init();
     tcp_reass_init();
 
     if (pcap_writer_init() != 0) {
-        return 1;
+        return -1;
     }
 
-    if (capture_init(argc, argv, g_filters.read_pcap ? g_filters.read_file : NULL) != 0) {
+    if (capture_init(argc, argv,
+                     g_filters.read_pcap ? g_filters.read_file : NULL) != 0) {
         fprintf(stderr, "Failed to init capture\n");
-        return 1;
+        return -1;
     }
 
+    perf_init();
+    perf_start();
+
+    return 0;
+}
+
+static void app_loop(void) {
+    pkt_view *pv = NULL;
+    filter_pktview_t fpv;
 
     while ((pv = capture_next()) != NULL) {
-        count++;
-        uint64_t now = now_tsc();
+        pv->ts_ns = now_tsc();   // stamp arrival time immediately
+
         if (extract_minimal_headers(&fpv, pv->data, pv->len) == 0) {
             if (filter_match(&fpv)) {
 
-                // Parse the packet (this may do frag/reassembly internally)
-                parse_packet(pv, now);
+                // Parse the packet
+                parse_packet(pv);
 
-                // Just for extreme debugging ...
-                // pkt_view_dump(pv);
+                // Latency: time spent in parsing + processing
+                uint64_t latency_ns = now_tsc() - pv->ts_ns;
+                perf_update(pv->len, latency_ns);
+
+                // Update talkers and stats
                 if (pv->is_tunnel && pv->inner_pkt) {
-                    // Print tunnel metadata for debugging / top talkers
-                    switch (pv->tunnel.type) {
-                        case TUNNEL_GRE:
-                            printf("[TOP] GRE tunnel: inner_proto=0x%04x flags=0x%04x len=%u\n",
-                                pv->tunnel.inner_proto, pv->tunnel.gre_flags, pv->inner_pkt->len);
-                            break;
-                        case TUNNEL_VXLAN:
-                            printf("[TOP] VXLAN tunnel: VNI=%u len=%u\n",
-                                pv->tunnel.vni, pv->inner_pkt->len);
-                            break;
-                        case TUNNEL_GENEVE:
-                            printf("[TOP] GENEVE tunnel: VNI=%u len=%u\n",
-                                pv->tunnel.vni, pv->inner_pkt->len);
-                            break;
-                        default:
-                            break;
-                    }
-
-                    // Update top talkers using inner packet if desired
-                    talkers_update(pv->inner_pkt ? pv->inner_pkt : pv);
+                    talkers_update(pv->inner_pkt);
                 }
-                /* Top Talkers Update */ 
                 talkers_update(pv);
 
-                // Update stats/talkers
-                stats_poll(now);
+                stats_poll();
 
                 if (g_filters.write_pcap) {
                     pcap_writer_write(pv->data, pv->len);
-                   // Optionally, write inner payload separately
                     if (pv->is_tunnel && pv->inner_pkt) {
-                        // You can adapt pcap_writer_write() to accept a label or new file
-                        pcap_writer_write((const uint8_t *)pv->inner_pkt->data, pv->inner_pkt->len);
+                        pcap_writer_write((const uint8_t *)pv->inner_pkt->data,
+                                          pv->inner_pkt->len);
                     }
                 }
+            } else {
+                global_stats.drop_filter_miss++;
+                global_stats.dropped++;
+                capture_free(pv);
+                continue;
             }
+        } else {
+            global_stats.drop_filter_miss++;
+            global_stats.dropped++;
+            capture_free(pv);
+            continue;
         }
-        // Always free/release the packet view (whether frag, heap, or mbuf)
+
         capture_free(pv);
         pv = NULL;
     }
+}
 
-    double t_end = now_sec();
-    double duration = t_end - t_start;
-    double pps = count / duration;
+static void app_cleanup(void) {
+    perf_stop();
 
-    printf("Processed %lu packets in %.3f sec -> %.2f PPS\n",
-           count, duration, pps);
-           
-    // After processing all packets from the PCAP:
+    // Final stats + perf report
+    stats_report_final();
+
     frag_ipv4_flush_all();
     frag_ipv6_flush_all();
+
     fflush(stdout);
     fflush(stderr);
+
     capture_close();
     pcap_writer_close();
     tcp_reass_fini();
-    return 0;
+}
+
+// Main packet processing loop
+int main(int argc, char **argv) {
+    if (app_init(argc, argv) != 0) {
+        return EXIT_FAILURE;
+    }
+
+    // DEBUG_MASK = DBG_PARSER;
+
+    app_loop();
+
+    app_cleanup();
+
+    return EXIT_SUCCESS;
 }

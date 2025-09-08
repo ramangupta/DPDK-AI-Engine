@@ -277,12 +277,25 @@ struct json_object *stats_build_json(void) {
 void write_stats_json(void)
 {
     struct json_object *root = stats_build_json();
+    if (!root) {
+        fprintf(stderr, "[ERROR] stats_build_json() returned NULL\n");
+        return;
+    }
 
     FILE *f = fopen("stats.json", "w");
-    if (f) {
-        fprintf(f, "%s\n", json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY));
-        fclose(f);
+    if (!f) {
+        fprintf(stderr, "[ERROR] Failed to open stats.json for writing\n");
+        json_object_put(root);
+        return;
     }
+
+    const char *js_str = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY);
+    if (fprintf(f, "%s\n", js_str) < 0) {
+        fprintf(stderr, "[ERROR] Failed to write to stats.json\n");
+    }
+
+    fclose(f);
     json_object_put(root); // free
 }
+
 

@@ -30,12 +30,16 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
 
     if (rem < sizeof(struct rte_ipv4_hdr)) {
         DEBUG_LOG(DBG_IP, "      IPv4 <truncated>\n");
+        global_stats.drop_invalid_ipv4++;
+        global_stats.dropped++;
         return;
     }
 
     uint8_t ihl = (ip4->version_ihl & 0x0F) * 4;
     if (ihl < sizeof(struct rte_ipv4_hdr) || ihl > rem) {
         DEBUG_LOG(DBG_IP, "      IPv4 <bad IHL>\n");
+        global_stats.drop_invalid_ipv4++;
+        global_stats.dropped++;
         return;
     }
 
@@ -141,24 +145,33 @@ void handle_ipv4(pkt_view *pv_full, pkt_view *pv_slice, uint64_t now)
                     } else {
                         DEBUG_LOG(DBG_IP,"      GRE unsupported inner proto=0x%04x\n", pv_full->tunnel.inner_proto);
                         // Do not attempt parse_l4() on outer GRE header — GRE is not L4 for us.
+                        global_stats.drop_invalid_tunnel++;
+                        global_stats.dropped++;
                     }
                 } else {
                     DEBUG_LOG(DBG_IP,"      [WARN] GRE inner packet missing\n");
+                    global_stats.drop_invalid_tunnel++;
+                    global_stats.dropped++;
                 }
                 break;
             case TUNNEL_VXLAN:
             case TUNNEL_GENEVE:
                 if (pv_payload.inner_pkt) 
                     // inner_pkt must point to an Ethernet frame
-                    parse_packet(pv_payload.inner_pkt, now);
-                else
+                    parse_packet(pv_payload.inner_pkt);
+                else {
                     DEBUG_LOG(DBG_IP,"      [WARN] VXLAN/GENEVE inner packet missing\n");
+                    global_stats.drop_invalid_tunnel++;
+                    global_stats.dropped++;
+                }
                 break;
             default:
                 // Unknown tunnel type — log and fall back to parsing payload as L4 if sensible
                 DEBUG_LOG(DBG_IP,"      Unknown tunnel type=%d\n", pv_full->tunnel.type);
                 if (pv_payload.inner_pkt) 
                     parse_l4(pv_full, pv_payload.inner_pkt, now);
+                global_stats.drop_invalid_tunnel++;
+                global_stats.dropped++;
                 break;
         }
     } else {

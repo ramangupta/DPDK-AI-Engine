@@ -44,26 +44,28 @@ int capture_init(int argc, char **argv, const char *file)
     }
 
     unsigned nb_ports = rte_eth_dev_count_avail();
-    DPDK_DEBUG_PRINT("DPDK reports %u available ports\n", nb_ports);
+    DEBUG_LOG(DBG_DPDK, "DPDK reports %u available ports\n", nb_ports);
     if (nb_ports == 0) {
-        DPDK_DEBUG_PRINT("No DPDK ports available (did you pass --vdev?).\n");
+        printf("No DPDK ports available (did you pass --vdev?).\n");
         return -1;
     }
 
     RTE_ETH_FOREACH_DEV(active_port) {
-        DPDK_DEBUG_PRINT("Found DPDK port %u\n", active_port);
+        DEBUG_LOG(DBG_DPDK, "Found DPDK port %u\n", active_port);
         break;
     }
     if (active_port == RTE_MAX_ETHPORTS) {
-        DPDK_DEBUG_PRINT("No usable ports found\n");
+        printf("No usable ports found\n");
         return -1;
     }
+
+    capture_port = active_port;
 
     mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL",
         NUM_MBUFS, MBUF_CACHE_SIZE, 0,
         RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
     if (!mbuf_pool) {
-        DPDK_DEBUG_PRINT("mbuf_pool create failed\n");
+        printf("mbuf_pool create failed\n");
         return -1;
     }
 
@@ -71,30 +73,30 @@ int capture_init(int argc, char **argv, const char *file)
     memset(&port_conf, 0, sizeof(port_conf));
 
     if (rte_eth_dev_configure(active_port, 1, 1, &port_conf) < 0) {
-        DPDK_DEBUG_PRINT("dev_configure failed\n");
+        printf("dev_configure failed\n");
         return -1;
     }
 
     if (rte_eth_rx_queue_setup(active_port, 0, RX_RING_SIZE,
                                rte_eth_dev_socket_id(active_port),
                                NULL, mbuf_pool) < 0) {
-        DPDK_DEBUG_PRINT("rx_queue_setup failed\n");
+        printf("rx_queue_setup failed\n");
         return -1;
     }
 
     if (rte_eth_tx_queue_setup(active_port, 0, RX_RING_SIZE,
                                rte_eth_dev_socket_id(active_port),
                                NULL) < 0) {
-        DPDK_DEBUG_PRINT("tx_queue_setup failed\n");
+        printf("tx_queue_setup failed\n");
         return -1;
     }
 
     if (rte_eth_dev_start(active_port) < 0) {
-        DPDK_DEBUG_PRINT("dev_start failed\n");
+        printf("dev_start failed\n");
         return -1;
     }
 
-    DPDK_DEBUG_PRINT("DPDK init success on port %u!\n", active_port);
+    DEBUG_LOG(DBG_DPDK, "DPDK init success on port %u!\n", active_port);
     return 0;
 }
 
@@ -110,8 +112,7 @@ pkt_view *capture_from_mbuf(struct rte_mbuf *mbuf) {
     pv->backing = mbuf;                             // remember mbuf for freeing later
     pv->inner_pkt = NULL;
 
-    DPDK_DEBUG_PRINT("OPTMIZATION 2: ZERO COPY ... USE DIRECT MBUF \n");
-    DPDK_DEBUG_PRINT("pkt_view=%p from mbuf=%p pkt_len=%u\n",
+    DEBUG_LOG(DBG_DPDK, "pkt_view=%p from mbuf=%p pkt_len=%u\n",
         (void*)pv, (void*)mbuf, pv->len);
 
     return pv;

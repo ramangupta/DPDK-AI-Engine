@@ -24,12 +24,16 @@ static void parse_ethernet(const struct rte_ether_hdr *eth,
     PARSER_LOG_LAYER("ETH", COLOR_ETH, " type=0x%04x\n", etype);
 }
 
-void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
+void parse_packet(pkt_view *pv_full)
 {
+    uint64_t now_tsc = pv_full->ts_ns;
+
     if (!pv_full || pv_full->len < sizeof(struct rte_ether_hdr)) {
         if (pv_full) {
             DEBUG_LOG(DBG_ETH, "[len=%" PRIu16 "] <truncated ethernet>\n", pv_full->len);
         }
+        global_stats.drop_truncated_eth++;
+        global_stats.dropped++;
         return;
     }
 
@@ -48,6 +52,8 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
         stats_update(PROTO_IPV4, pktlen);
         if (rem < sizeof(struct rte_ipv4_hdr)) {
             DEBUG_LOG(DBG_ETH, "      IPv4 <truncated>\n");
+            global_stats.drop_invalid_ipv4++;
+            global_stats.dropped++;
             return;
         }
         pkt_view ipview = {
@@ -63,6 +69,8 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
         stats_update(PROTO_IPV6, pktlen);
         if (rem < sizeof(struct rte_ipv6_hdr)) {
             DEBUG_LOG(DBG_ETH, "      IPv6 <truncated>\n");
+            global_stats.drop_invalid_ipv6++;
+            global_stats.dropped++;
             return;
         }
         pkt_view ipview = {
@@ -86,11 +94,17 @@ void parse_packet(pkt_view *pv_full, uint64_t now_tsc)
             handle_arp(pv_full, &arpview);
         } else {
             DEBUG_LOG(DBG_ETH, "ARP <truncated>\n");
+            global_stats.drop_truncated_eth++;
+            global_stats.dropped++;
         }
     } else if (etype == RTE_ETHER_TYPE_VLAN) {
         DEBUG_LOG(DBG_ETH, "      VLAN (not decoded in this sample)\n");
+        global_stats.drop_other++;
+        global_stats.dropped++;
     } else {
         DEBUG_LOG(DBG_ETH, "      EtherType 0x%04x not decoded\n", etype);
+        global_stats.drop_invalid_ethertype++;
+        global_stats.dropped++;
     }
     // talkers_report();
 }

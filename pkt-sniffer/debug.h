@@ -18,6 +18,7 @@
 #define DBG_DHCP      (1 << 9)
 #define DBG_ARP       (1 << 10)
 #define DBG_IPFRAG    (1 << 11)
+#define DBG_DPDK      (1 << 12)
 
 // Global debug mask (set at runtime)
 extern unsigned int DEBUG_MASK;
