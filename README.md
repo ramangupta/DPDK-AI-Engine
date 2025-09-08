@@ -1,5 +1,8 @@
 # ⚡🚀 DPDK-AI-Engine: Next-Gen Packet Analytics
 
+> Ultra-low latency packet analytics with DPDK & AI — Analyzing traffic at line-rate with nanosecond precision.
+
+
 [![Build](https://img.shields.io/github/actions/workflow/status/<your-org>/<repo>/ci.yml?branch=master)](../../actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/<your-org>/<repo>?style=social)](../../stargazers)
