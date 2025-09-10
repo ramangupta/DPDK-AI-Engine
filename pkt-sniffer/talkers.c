@@ -43,8 +43,15 @@ void talkers_update(const pkt_view *pv) {
                  src_ip, pv->src_mac,
                  dst_ip, pv->dst_mac);
     } else {
-        proto_str = proto_name(pv->l3_proto);  // fallback: name L3 proto if possible
-        snprintf(flowbuf, sizeof(flowbuf), "len=%u", pv->len);
+        proto_str = proto_name(pv->l3_proto);
+
+        if (strlen(src_ip) && strlen(dst_ip)) {
+            // show addresses without ports
+            snprintf(flowbuf, sizeof(flowbuf), "%s -> %s", src_ip, dst_ip);
+        } else {
+            // last fallback: just length
+            snprintf(flowbuf, sizeof(flowbuf), "Other(len=%u)", pv->len);
+        }
     }
 
     // Update existing entry if match

@@ -11,4 +11,5 @@ backup.c
 *.swo
 *.tmp
 .DS_Store
-
+web/stats.json
+docs/testing/

@@ -12,18 +12,37 @@
 struct json_object *stats_build_json(void) {
     struct json_object *root = json_object_new_object();
 
+    // --- Perf / Traffic Totals ---
+    double runtime_sec = perf_stats.runtime_sec > 0 ? perf_stats.runtime_sec : 1.0;
+    double pps = perf_stats.total_pkts / runtime_sec;
+    double bps = perf_stats.total_bytes / runtime_sec;   // bytes/sec
+    
+    struct json_object *perf = json_object_new_object();
+    json_object_object_add(perf, "total_pkts", json_object_new_int64(perf_stats.total_pkts));
+    json_object_object_add(perf, "total_bytes", json_object_new_int64(perf_stats.total_bytes));
+    json_object_object_add(perf, "pps", json_object_new_double(pps));
+    json_object_object_add(perf, "bandwidth_bps", json_object_new_double(bps * 8));
+    json_object_object_add(perf, "mbps", json_object_new_double(perf_stats.mbps));
+
+    // --- Latency ---
+    if (perf_stats.latency_count > 0) {
+
+        perf_compute_percentiles(&perf_stats);
+
+        double avg_ms = (double)perf_stats.latency_sum_ns / perf_stats.latency_count / 1e6;
+        json_object_object_add(perf, "latency_min_ms", json_object_new_double(perf_stats.latency_min_ns / 1e6));
+        json_object_object_add(perf, "latency_max_ms", json_object_new_double(perf_stats.latency_max_ns / 1e6));
+        json_object_object_add(perf, "latency_avg_ms", json_object_new_double(avg_ms));
+        json_object_object_add(perf, "latency_p95_ms", json_object_new_double(perf_stats.latency_p95_ns / 1e6));
+        json_object_object_add(perf, "latency_p99_ms", json_object_new_double(perf_stats.latency_p99_ns / 1e6));
+        json_object_object_add(perf, "latency_samples", json_object_new_int64(perf_stats.latency_count));
+    }
+
     // --- Summary ---
-
-    double pps = (stats_get_total_pkts() * 1.0) / REPORT_INTERVAL;
-    double bps = (stats_get_total_bytes() * 1.0) / REPORT_INTERVAL;
-
     struct json_object *summary = json_object_new_object();
-    json_object_object_add(summary, "interval_sec", json_object_new_int(REPORT_INTERVAL));
-    json_object_object_add(summary, "total_pkts", json_object_new_int64(stats_get_total_pkts()));
-    json_object_object_add(summary, "total_bytes", json_object_new_int64(stats_get_total_bytes()));
-    json_object_object_add(summary, "pps", json_object_new_double(pps));
-    json_object_object_add(summary, "bandwidth_kbps", json_object_new_double(bps/1000.0));
+    json_object_object_add(summary, "perf", perf);
 
+    // --- Per-Protocol ---
     struct json_object *per_proto = json_object_new_object();
     json_object_object_add(per_proto, "ipv4", json_object_new_int64(global_stats.ipv4));
     json_object_object_add(per_proto, "ipv6", json_object_new_int64(global_stats.ipv6));
@@ -35,8 +54,8 @@ struct json_object *stats_build_json(void) {
     json_object_object_add(per_proto, "tls_handshake", json_object_new_int64(global_stats.tls_handshake));
     json_object_object_add(per_proto, "tls_appdata",  json_object_new_int64(global_stats.tls_appdata));
     json_object_object_add(per_proto, "http", json_object_new_int64(global_stats.http));
-    json_object_object_add(summary, "per_proto", per_proto);
 
+    json_object_object_add(summary, "per_proto", per_proto);
     json_object_object_add(root, "summary", summary);
 
         // --- Per-Protocol stats ---

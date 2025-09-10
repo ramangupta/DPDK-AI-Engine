@@ -184,6 +184,8 @@ typedef struct {
 
 
 // ---------------- Perf Stats ----------------
+#define MAX_LATENCY_SAMPLES 1000000  // adjust based on memory
+
 typedef struct {
     struct timeval start_time;
     struct timeval end_time;
@@ -198,13 +200,18 @@ typedef struct {
     double mbps;      // Megabits per second
 
     // Latency (if collected)
-    uint64_t latency_samples;
+    uint64_t latency_samples[MAX_LATENCY_SAMPLES];
+    size_t   latency_count;          // number of collected samples
     uint64_t latency_min_ns;
     uint64_t latency_max_ns;
     uint64_t latency_sum_ns;
 
+    double   latency_p95_ns;
+    double   latency_p99_ns;
+
     uint64_t stats_write_ns;
 } perf_stats_t;
+
 
 // ---------------- Externs ----------------
 extern struct stats global_stats;
@@ -276,4 +283,7 @@ http_session_t *stats_get_http_table(void);
 int stats_get_http_count(void);
 struct frag_stat *stats_get_frag_table(void);
 int stats_get_frag_count(void);
+
+void perf_compute_percentiles(perf_stats_t *stats);
+
 #endif

@@ -425,6 +425,23 @@ void stats_report_tls(void)
     }
 }
 
+void perf_update_runtime(void) {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    double start = perf_stats.start_time.tv_sec +
+                   perf_stats.start_time.tv_usec / 1e6;
+    double end   = now.tv_sec + now.tv_usec / 1e6;
+
+    perf_stats.runtime_sec = (end - start);
+
+    if (perf_stats.runtime_sec > 0) {
+        perf_stats.pps  = perf_stats.total_pkts / perf_stats.runtime_sec;
+        perf_stats.bps  = (perf_stats.total_bytes * 8) / perf_stats.runtime_sec;
+        perf_stats.mbps = perf_stats.bps / 1e6;
+    }
+}
+
 void stats_poll(void) {
     static uint64_t last_report = 0;
     static uint64_t last_maint  = 0;
@@ -461,6 +478,8 @@ void stats_poll(void) {
 
         struct timespec start_ts, end_ts;
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
+
+        perf_update_runtime();
         // Periodic JSON/machine output
         write_stats_json();
 
@@ -714,18 +733,44 @@ void perf_stop(void) {
     }
 }
 
-void perf_update(uint16_t pktlen, uint64_t pkt_ns) {
+int cmp_uint64(const void *a, const void *b) {
+    uint64_t va = *(uint64_t*)a;
+    uint64_t vb = *(uint64_t*)b;
+    return (va > vb) - (va < vb);
+}
+
+void perf_compute_percentiles(perf_stats_t *stats) {
+    if (stats->latency_count == 0) {
+        stats->latency_p95_ns = 0;
+        stats->latency_p99_ns = 0;
+        return;
+    }
+
+    // Sort the samples in-place
+    qsort(stats->latency_samples, stats->latency_count, sizeof(uint64_t), cmp_uint64);
+
+    // Compute P95 and P99 indices
+    size_t idx95 = (size_t)(0.95 * (stats->latency_count - 1));
+    size_t idx99 = (size_t)(0.99 * (stats->latency_count - 1));
+
+    stats->latency_p95_ns = (double)stats->latency_samples[idx95];
+    stats->latency_p99_ns = (double)stats->latency_samples[idx99];
+}
+
+void perf_update(uint16_t pktlen, uint64_t pkt_ns) 
+{
     perf_stats.total_pkts++;
     perf_stats.total_bytes += pktlen;
 
-    // Update min/max latency if pkt_ns is valid
-    if (pkt_ns > 0) {
-        perf_stats.latency_samples++;
-        if (pkt_ns < perf_stats.latency_min_ns || perf_stats.latency_samples == 1)
-            perf_stats.latency_min_ns = pkt_ns;
-        if (pkt_ns > perf_stats.latency_max_ns)
-            perf_stats.latency_max_ns = pkt_ns;
+    if(pkt_ns > 0) {
         perf_stats.latency_sum_ns += pkt_ns;
+        if(pkt_ns < perf_stats.latency_min_ns || perf_stats.latency_count == 0)
+            perf_stats.latency_min_ns = pkt_ns;
+        if(pkt_ns > perf_stats.latency_max_ns)
+            perf_stats.latency_max_ns = pkt_ns;
+
+        if(perf_stats.latency_count < MAX_LATENCY_SAMPLES)
+            perf_stats.latency_samples[perf_stats.latency_count++] = pkt_ns;
     }
 }
 
@@ -806,14 +851,18 @@ void stats_report_final(void) {
     printf("Pool exhausted count  : %lu\n", atomic_load(&tcp_seg_pool_exhausted));
 
     // --- Latency ---
-    if (perf_stats.latency_samples > 0) {
-        double avg_ms = (double)perf_stats.latency_sum_ns / perf_stats.latency_samples / 1e6;
+    if (perf_stats.latency_count > 0) {
+
+        perf_compute_percentiles(&perf_stats);
+
         printf("\n--- Latency (ms) ---\n");
-        printf("Latency (ms)    : min %.3f, max %.3f, avg %.3f\n",
-               perf_stats.latency_min_ns / 1e6,
-               perf_stats.latency_max_ns / 1e6,
-               avg_ms);
-        printf("Samples             : %lu\n", perf_stats.latency_samples);
+        printf("Latency (ms) : min %.3f, max %.3f, avg %.3f, p95 %.3f, p99 %.3f\n",
+                perf_stats.latency_min_ns / 1e6,
+                perf_stats.latency_max_ns / 1e6,
+                (double)perf_stats.latency_sum_ns / perf_stats.latency_count / 1e6,
+                perf_stats.latency_p95_ns / 1e6,
+                perf_stats.latency_p99_ns / 1e6);
+        printf("Samples          : %lu\n", perf_stats.latency_count);
     }
 
     // --- Stats Reporting / Overhead ---
