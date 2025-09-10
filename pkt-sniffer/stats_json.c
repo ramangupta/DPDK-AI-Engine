@@ -282,16 +282,16 @@ void write_stats_json(void)
         return;
     }
 
-    FILE *f = fopen("stats.json", "w");
+    FILE *f = fopen("../web/stats.json", "w");
     if (!f) {
-        fprintf(stderr, "[ERROR] Failed to open stats.json for writing\n");
+        fprintf(stderr, "[ERROR] Failed to open web/stats.json for writing\n");
         json_object_put(root);
         return;
     }
 
     const char *js_str = json_object_to_json_string_ext(root, JSON_C_TO_STRING_PRETTY);
     if (fprintf(f, "%s\n", js_str) < 0) {
-        fprintf(stderr, "[ERROR] Failed to write to stats.json\n");
+        fprintf(stderr, "[ERROR] Failed to write to web/stats.json\n");
     }
 
     fclose(f);

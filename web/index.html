@@ -285,7 +285,7 @@ let summaryPieChart = new Chart(pieCtx, {
 
 async function fetchStats(){
   try{
-    const res = await fetch('../../pkt-sniffer/stats.json?_=' + Date.now());
+    const res = await fetch('stats.json?_=' + Date.now());
     if(!res.ok) throw new Error('HTTP '+res.status);
     const js = await res.json();
     updateUI(js);
