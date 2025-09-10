@@ -50,8 +50,8 @@ void capture_close(void);
 
 // For reassembly or any buffer you need to create
 pkt_view* capture_alloc(size_t len); // returns heap-backed pkt_view
-pkt_view *capture_wrap(const uint8_t *data, size_t len);
 void capture_free(pkt_view *pv);
+
 
 #ifdef USE_DPDK
 #include <rte_mbuf.h>

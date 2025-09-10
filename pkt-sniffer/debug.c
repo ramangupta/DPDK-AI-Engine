@@ -14,11 +14,14 @@ void debug_log(const char *class_name, const char *func, int line, const char *f
     char time_buf[9];
     strftime(time_buf, sizeof(time_buf), "%H:%M:%S", tm_info);
 
-    fprintf(stdout, "[%s][%s][%s:%d] ", time_buf, class_name, func, line);
-    vfprintf(stdout, fmt, args);
-    fprintf(stdout, "\n");
+    fprintf(stderr, "[%s][%s][%s:%d] ", time_buf, class_name, func, line);
+    vfprintf(stderr, fmt, args);
+    fprintf(stderr, "\n");
 
     va_end(args);
+
+    // stderr is unbuffered, but adding flush is extra safe
+    fflush(stderr);
 }
 
 void print_layer(const char *layer, const char *color, const char *func, int line, const char *fmt, ...) {

@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    // DEBUG_MASK = DBG_PARSER;
+    // DEBUG_MASK = DBG_DPDK;
 
     app_loop();
 

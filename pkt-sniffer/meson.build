@@ -16,7 +16,6 @@ sources = [
   'talkers.c',
   'frag_ipv4.c',
   'frag_ipv6.c',
-  'capture_common.c',
   'parse_arp.c',
   'parse_dhcp.c',
   'parse_http.c',
