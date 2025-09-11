@@ -1,5 +1,5 @@
 #include "cli.h"
-#include "filter.h"
+#include "utils/filter.h"
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>

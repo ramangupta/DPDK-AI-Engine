@@ -1,20 +1,28 @@
+// main.c
+
+// Standard / system
 #include <stdio.h>
 #include <stdint.h>
-#include "capture.h"
+
+// Project headers
 #include "tsc.h"
-#include "parse_eth.h"
-#include "stats.h"
-#include "frag_ipv4.h"
+#include "engine/capture.h"
+
+#include "parsers/parse_eth.h"
+#include "parsers/frag_ipv4.h"
+#include "parsers/tcp_reass.h"
+#include "parsers/parse_tunnel.h"
+
+#include "stats/stats.h"
+
 #include "cli.h"
-#include "filter.h"
-#include "talkers.h"
-#include "pcap_writer.h"
-#include "sniffer_signal.h"
-#include "utils.h"
-#include "tcp_reass.h"
-#include "parse_tunnel.h"
-#include "time.h"
-#include "debug.h"
+#include "utils/filter.h"
+#include "utils/talkers.h"
+#include "utils/pcap_writer.h"
+#include "utils/sniffer_signal.h"
+#include "utils/utils.h"
+#include "utils/debug.h"
+
 
 static inline double now_sec(void) {
     struct timespec ts;

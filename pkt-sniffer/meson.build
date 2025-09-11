@@ -4,54 +4,37 @@ project('pkt-sniffer', 'c',
 
 capture_backend = get_option('capture_backend')
 
-sources = [
-  'main.c',
-  'parse_eth.c',
-  'parse_ipv4.c',
-  'parse_ipv6.c',
-  'parse_l4.c',
-  'parse_dns.c',
-  'stats.c',
-  'utils.c',
-  'talkers.c',
-  'frag_ipv4.c',
-  'frag_ipv6.c',
-  'parse_arp.c',
-  'parse_dhcp.c',
-  'parse_http.c',
-  'parse_tls.c',
-  'cli.c',
-  'filter.c',
-  'pcap_writer.c',
-  'sniffer_signal.c',
-  'tcp_reass.c',
-  'flows.c',
-  'parse_tunnel.c',
-  'parse_tls_cert.c',
-  'stats_json.c',
-  'debug.c',
-]
-
+# --- Dependencies ---
 deps = []
-
-# Dependencies
 jsonc_dep = dependency('json-c', required: true)
 pcap_dep  = dependency('pcap', required: true)
+deps += [jsonc_dep, pcap_dep]
+
+# --- Source groups ---
+engine_src = []
 
 if capture_backend == 'afp'
-  sources += ['capture_afp.c', 'time_afp.c']
+  engine_src += files(
+    'engine/capture_afp.c',
+    'engine/time/time_afp.c',
+  )
   deps += [pcap_dep]
 
 elif capture_backend == 'pcap'
-  sources += ['capture_pcap.c', 'time_pcap.c']
+  engine_src += files(
+    'engine/capture_pcap.c',
+    'engine/time/time_pcap.c',
+  )
   deps += [pcap_dep]
 
 elif capture_backend == 'dpdk'
-  sources += ['capture_dpdk.c', 'time_dpdk.c']
+  engine_src += files(
+    'engine/capture_dpdk.c',
+    'engine/time/time_dpdk.c',
+  )
   deps += [dependency('libdpdk')]
   add_global_arguments('-DUSE_DPDK', language: 'c')
 
-  # Enable ASan only for debug builds
   if get_option('buildtype') == 'debug'
     add_project_arguments(
       '-fsanitize=address',
@@ -68,15 +51,66 @@ else
   error('Unsupported capture backend: ' + capture_backend)
 endif
 
-# Add json-c and pcap globally
-deps += [jsonc_dep, pcap_dep]
+parser_src = files(
+  'parsers/frag_ipv4.c',
+  'parsers/frag_ipv6.c',
+  'parsers/tcp_reass.c',
+  'parsers/parse_arp.c',
+  'parsers/parse_eth.c',
+  'parsers/parse_ipv4.c',
+  'parsers/parse_ipv6.c',
+  'parsers/parse_l4.c',
+  'parsers/parse_tls.c',
+  'parsers/parse_http.c',
+  'parsers/parse_tunnel.c',
+  'parsers/parse_dns.c',
+  'parsers/parse_dhcp.c',
+  'parsers/parse_tls_cert.c',
+)
 
+stats_src = files(
+  'stats/stats.c',
+  'stats/stats_json.c',
+)
+
+utils_src = files(
+  'utils/filter.c',
+  'utils/flows.c',
+  'utils/talkers.c',
+  'utils/utils.c',
+  'utils/debug.c',
+  'utils/pcap_writer.c',
+  'utils/sniffer_signal.c',
+)
+
+ai_src = files(
+  'ai/placeholder.c',
+)
+
+all_src = engine_src + parser_src + stats_src + utils_src + ai_src + files(
+  'main.c',
+  'cli.c',
+)
+
+# --- Include dirs ---
+inc = include_directories(
+  '.',
+  'engine',
+  'engine/time',
+  'parsers',
+  'stats',
+  'utils',
+  'ai',
+)
+
+# --- Target ---
 executable('pkt-sniffer',
-           sources,
+           all_src,
+           include_directories: inc,
            dependencies: deps,
            install: true)
 
-# Build-time hints
+# --- Build-time hints ---
 message('==========================================================')
 message(' Selected capture backend: ' + capture_backend)
 if capture_backend == 'dpdk'
