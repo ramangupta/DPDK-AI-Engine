@@ -56,6 +56,14 @@ Here’s a quick look at the dashboard and live parser logs in action:
 
 ## ✨ Features
 
+### 🔥 Market Analytics
+
+![Market Analytics Screenshot](docs/Market_View.gif)
+
+View live market data, charts, and analytics in real-time.
+
+---
+
 ✅ **Capture Modes**
 
 * **DPDK mode** for ultra-low latency (nanosecond precision).
