@@ -457,13 +457,17 @@ void stats_poll(void) {
     uint64_t now_sec;
     uint64_t now_ns;
 
+
+
 #ifdef USE_DPDK
     uint64_t hz = rte_get_tsc_hz();
+    if (hz == 0) hz = 1; // prevent division by zero
     now_sec = curr_tsc / hz;
     now_ns  = (curr_tsc * 1000000000ULL) / hz;
 #else
+    if (curr_tsc == 0) curr_tsc = 1; // prevent division by zero (if needed)
     now_sec = curr_tsc / 1000000000ULL;
-    now_ns  = curr_tsc;
+    now_ns  = curr_tsc % 1000000000ULL; // remainder in ns
 #endif
 
     if (last_report == 0) {

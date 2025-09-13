@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <stdatomic.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <time.h>
 
 #include "engine/capture.h"
 #include "stats/stats.h"
@@ -12,9 +15,7 @@
 #include "parsers/parse_tls.h"
 #include "parsers/tcp_reass.h"
 
-/* -------- Lock abstraction (per-flow) --------
-+ * Default: pthread mutex. If building with DPDK, define USE_RTE to use spinlocks.
-+ */
+/* -------- Lock abstraction (per-flow) -------- */
 #ifdef USE_DPDK
 #include <rte_spinlock.h>
 typedef rte_spinlock_t flow_lock_t;
@@ -23,7 +24,6 @@ typedef rte_spinlock_t flow_lock_t;
 #define flow_lock_release(L)  rte_spinlock_unlock((L))
 #define flow_lock_destroy(L)  ((void)0)
 #else
-#include <pthread.h>
 typedef pthread_mutex_t flow_lock_t;
 #define flow_lock_init(L)     pthread_mutex_init((L), NULL)
 #define flow_lock_acquire(L)  pthread_mutex_lock((L))
@@ -31,8 +31,6 @@ typedef pthread_mutex_t flow_lock_t;
 #define flow_lock_destroy(L)  pthread_mutex_destroy((L))
 #endif
 
-
-/* Config knobs (override at compile time if needed) */
 #ifndef TCP_REASS_FLOW_TIMEOUT_SEC
 #define TCP_REASS_FLOW_TIMEOUT_SEC 120
 #endif
@@ -42,22 +40,29 @@ typedef pthread_mutex_t flow_lock_t;
 #endif
 
 #ifndef TCP_PER_FLOW_CAP_BYTES
-#define TCP_PER_FLOW_CAP_BYTES (1024*1024) /* 1 MiB per direction */
+#define TCP_PER_FLOW_CAP_BYTES (1024*1024)
 #endif
 
-#define POOL_SIZE_SEGMENTS 65536      // 64k preallocated segments
-#define SEG_DATA_MAX_LEN   2048       // max payload per segment
+#define POOL_SIZE_SEGMENTS 65536
+#define SEG_DATA_MAX_LEN   2048
+
+typedef struct tcp_seg {
+    uint32_t seq;
+    uint32_t len;
+    time_t ts;
+    struct tcp_seg *next;
+    uint8_t data[SEG_DATA_MAX_LEN];  // embedded buffer
+} tcp_seg_t;
 
 typedef struct tcp_seg_pool_s {
     tcp_seg_t segs[POOL_SIZE_SEGMENTS];
-    uint8_t  data[POOL_SIZE_SEGMENTS][SEG_DATA_MAX_LEN];
-    atomic_uint free_head;           // index of first free segment
-    uint32_t next[POOL_SIZE_SEGMENTS]; // linked list of free segments
+    atomic_uint free_head;
+    uint32_t next[POOL_SIZE_SEGMENTS];
 } tcp_seg_pool_t;
 
 static tcp_seg_pool_t tcp_seg_pool;
 
-// Stats
+/* Stats */
 atomic_ulong tcp_segments_in_use;
 atomic_ulong tcp_segments_bytes;
 atomic_ulong tcp_seg_pool_exhausted;
@@ -116,7 +121,6 @@ void        tcp_flow_set_l7_proto(tcp_flow_t *flow, int l7_proto) {
 static void tcp_seg_pool_init(void) {
     for (uint32_t i = 0; i < POOL_SIZE_SEGMENTS; i++) {
         tcp_seg_pool.next[i] = i + 1;
-        tcp_seg_pool.segs[i].data = tcp_seg_pool.data[i];
         tcp_seg_pool.segs[i].len = 0;
         tcp_seg_pool.segs[i].next = NULL;
     }
@@ -131,10 +135,8 @@ static void tcp_seg_pool_init(void) {
 static inline uint32_t flow_hash(const char *saddr, const char *daddr,
                                  uint16_t sport, uint16_t dport) {
     uint32_t h = 5381;
-    const char *p = saddr;
-    while (*p) h = ((h << 5) + h) ^ *p++;
-    p = daddr;
-    while (*p) h = ((h << 5) + h) ^ *p++;
+    for (const char *p = saddr; *p; p++) h = ((h << 5) + h) ^ *p;
+    for (const char *p = daddr; *p; p++) h = ((h << 5) + h) ^ *p;
     h ^= sport; h ^= dport;
     return h % TCP_REASS_HASH_BUCKETS;
 }
@@ -157,7 +159,9 @@ static tcp_seg_t *seg_new(const uint8_t *data, uint32_t len, uint32_t seq, time_
             s->len = (len > SEG_DATA_MAX_LEN) ? SEG_DATA_MAX_LEN : len;
             s->ts  = ts;
             s->next = NULL;
-            if (data && s->len > 0) memcpy(s->data, data, s->len);
+
+            if (data && s->len > 0)
+                memcpy(s->data, data, s->len); // safe copy
 
             atomic_fetch_add(&tcp_segments_in_use, 1);
             atomic_fetch_add(&tcp_segments_bytes, s->len);
@@ -165,10 +169,9 @@ static tcp_seg_t *seg_new(const uint8_t *data, uint32_t len, uint32_t seq, time_
         }
         idx = atomic_load(&tcp_seg_pool.free_head);
     }
-    // pool exhausted
     atomic_fetch_add(&tcp_seg_pool_exhausted, 1);
     return NULL;
-}
+}   
 
 static void seg_free(tcp_seg_t *s) {
     if (!s) return;

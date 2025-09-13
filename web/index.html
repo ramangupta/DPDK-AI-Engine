@@ -24,24 +24,34 @@
       <p class="text-sm text-slate-300">Auto-updating dashboard. Data source: <code class="mono">/stats.json</code></p>
     </div>
     <div class="ml-auto text-sm text-slate-400">Polling: <span id="poll-interval">2s</span></div>
-  </header>
+  <div class="ml-auto text-sm text-slate-400 flex gap-2">
+    <button class="tab-btn px-3 py-1 rounded bg-blue-600" data-tab="home">Home</button>
+    <button class="tab-btn px-3 py-1 rounded bg-slate-700" data-tab="market">Market Data</button>
+  </div>
+</header>
+  
 
-  <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+ <main class="p-6 space-y-6">
+  <!-- HOME TAB -->
+  <div id="tab-home" class="tab-content">
     <!-- Summary cards -->
-    <section class="lg:col-span-1 space-y-4">
-      <div class="card p-4 rounded-lg">
-        <h2 class="text-lg font-semibold">Performance Metrics</h2>
-        <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
-          <div>Total Packets: <span id="perf-pkts">-</span></div>
-          <div>Total Bytes: <span id="perf-bytes">-</span></div>
-          <div>PPS: <span id="perf-pps">-</span></div>
-          <div>Throughput (Mbps): <span id="perf-mbps">-</span></div>
-          <div>Latency Min: <span id="perf-lat-min">-</span> ms</div>
-          <div>Latency Max: <span id="perf-lat-max">-</span> ms</div>
-          <div>Latency Avg: <span id="perf-lat-avg">-</span> ms</div>
-          <div>Latency P95: <span id="perf-lat-p95">-</span> ms</div>
-          <div>Latency P99: <span id="perf-lat-p99">-</span> ms</div>
-          <div>Samples: <span id="perf-lat-samples">-</span></div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Summary cards -->
+      <section class="lg:col-span-1 space-y-4">
+        <!-- Performance Metrics -->
+        <div class="card p-4 rounded-lg">
+          <h2 class="text-lg font-semibold">Performance Metrics</h2>
+          <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>Total Packets: <span id="perf-pkts">-</span></div>
+            <div>Total Bytes: <span id="perf-bytes">-</span></div>
+            <div>PPS: <span id="perf-pps">-</span></div>
+            <div>Throughput (Mbps): <span id="perf-mbps">-</span></div>
+            <div>Latency Min: <span id="perf-lat-min">-</span> ms</div>
+            <div>Latency Max: <span id="perf-lat-max">-</span> ms</div>
+            <div>Latency Avg: <span id="perf-lat-avg">-</span> ms</div>
+            <div>Latency P95: <span id="perf-lat-p95">-</span> ms</div>
+            <div>Latency P99: <span id="perf-lat-p99">-</span> ms</div>
+            <div>Samples: <span id="perf-lat-samples">-</span></div>
         </div>
       </div>
       <div class="card p-4 rounded-lg">
@@ -224,14 +234,47 @@
           </table>
         </div>
       </div>
-  </main>
+    </div>
+  </div>
 
-  <footer class="mt-8 text-sm text-slate-400">Updated: <span id="updated">-</span></footer>
+  <!-- MARKET DATA TAB -->
+  <div id="tab-market" class="tab-content hidden">
+    <div class="p-4 bg-slate-800 rounded-2xl shadow">
+      <h2 class="text-lg font-semibold mb-3">Market Data</h2>
+      <div class="overflow-auto max-h-96 min-h-[200px]">
+        <table class="w-full text-sm">
+          <thead class="text-slate-300 text-xs border-b border-slate-700">
+            <tr>
+              <th class="px-2 py-1 text-left">Symbol</th>
+              <th class="px-2 py-1 text-right">Price</th>
+              <th class="px-2 py-1 text-right">Bid</th>
+              <th class="px-2 py-1 text-right">Ask</th>
+              <th class="px-2 py-1 text-right">Qty</th>
+              <th class="px-2 py-1 text-center">Side</th>
+              <th class="px-2 py-1 text-left">Exchange</th>
+              <th class="px-2 py-1 text-right">Change %</th>
+            </tr>
+          </thead>
+          <tbody id="market-table" class="text-slate-200">
+            <tr>
+              <td colspan="4" class="px-2 py-4 text-center text-slate-500">No market data</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <canvas id="market-chart" height="200" class="mt-6"></canvas>
+    </div>
+  </div>
+</main>
+
+<footer class="mt-8 text-sm text-slate-400">Updated: <span id="updated">-</span></footer>
 
 <script>
 // Configuration
 const POLL_INTERVAL_MS = 2000;
 const MAX_POINTS = 40;
+
+let lastStats = null;
 
 function fmtBytes(n) { if (n==null) return '-'; const u=['B','KB','MB','GB']; let i=0; while(n>=1024 && i<u.length-1){n/=1024;i++;} return n.toFixed(i?2:0)+' '+u[i]; }
 function fmtNum(n){ return (n==null) ? '-' : n.toLocaleString(); }
@@ -276,14 +319,112 @@ let summaryPieChart = new Chart(pieCtx, {
   }
 });
 
+// Market Chart
+const marketChart = new Chart(document.getElementById('market-chart').getContext('2d'), {
+  type:'line',
+  data:{labels:[], datasets:[{label:'Price', data:[], borderColor:'#facc15', backgroundColor:'rgba(250,204,21,0.2)', tension:0.3}]},
+  options:{animation:false, plugins:{legend:{display:false}}}
+});
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tabId = 'tab-' + btn.dataset.tab;
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('bg-blue-600'); b.classList.add('bg-slate-700'); });
+    const tabContent = document.getElementById(tabId);
+    tabContent.classList.remove('hidden');
+    btn.classList.remove('bg-slate-700'); btn.classList.add('bg-blue-600');
+
+    if(tabId==='tab-market' && lastStats){
+      updateMarket(lastStats.market);
+      marketChart.resize();
+    }
+  });
+});
+
+const prevPrices = {}; // store previous price per symbol
+
+function updateMarket(market){
+  const tbody = document.getElementById('market-table');
+  if(!tbody) return;
+
+  tbody.innerHTML = '';
+  if(!market || market.length===0){
+    tbody.innerHTML = `<tr><td colspan="8" class="px-2 py-4 text-center text-slate-500">No market data</td></tr>`;
+    marketChart.data.labels = [];
+    marketChart.data.datasets[0].data = [];
+    marketChart.update('none');
+    return;
+  }
+
+  // Find max qty for scaling volume bars
+  const maxQty = Math.max(...market.map(m => m.qty), 1);
+
+  marketChart.data.labels = [];
+  marketChart.data.datasets[0].data = [];
+
+  market.forEach(msg => {
+    const symbol = msg.symbol;
+
+    // Calculate Change %
+    let changePercent = '-';
+    if(prevPrices[symbol] !== undefined && prevPrices[symbol] !== 0){
+      changePercent = ((msg.price - prevPrices[symbol]) / prevPrices[symbol] * 100).toFixed(2);
+    }
+    prevPrices[symbol] = msg.price;
+
+    // Map side to text + color
+    let sideText = '-';
+    let sideClass = '';
+    if(msg.side === '1') { sideText = 'Buy'; sideClass = 'text-green-400'; }
+    else if(msg.side === '2') { sideText = 'Sell'; sideClass = 'text-red-400'; }
+    else { sideText = 'Unknown'; sideClass = 'text-slate-400'; }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-2 py-1 w-24">${symbol}</td>
+      <td class="px-2 py-1 w-20 text-right">${msg.price.toFixed(2)}</td>
+      <td class="px-2 py-1 w-20 text-right">${msg.bid_price.toFixed(2)}</td>
+      <td class="px-2 py-1 w-20 text-right">${msg.ask_price.toFixed(2)}</td>
+      <td class="px-2 py-1 w-32 text-right">
+        <div class="flex items-center">
+          <span class="mr-2">${msg.qty}</span>
+          <div class="h-2 bg-yellow-300 rounded" style="width:${Math.min(msg.qty / maxQty * 100,100)}%"></div>
+        </div>
+      </td>
+      <td class="px-2 py-1 w-16 text-center ${sideClass}">${sideText}</td>
+      <td class="px-2 py-1 w-24 text-left">${msg.exchange}/${msg.protocol}</td>
+      <td class="px-2 py-1 w-20 text-right ${changePercent >= 0 ? 'text-green-400' : 'text-red-400'}">${changePercent}</td>
+    `;
+    tbody.appendChild(tr);
+
+    // Update chart
+    marketChart.data.labels.push(symbol);
+    marketChart.data.datasets[0].data.push(msg.price);
+  });
+
+  marketChart.update('none');
+}
+
+
 
 async function fetchStats(){
   try{
     const res = await fetch('stats.json?_=' + Date.now());
     if(!res.ok) throw new Error('HTTP '+res.status);
     const js = await res.json();
+    lastStats = js;
     updateUI(js);
   }catch(e){ console.error('fetchStats', e); }
+}
+
+// Add point helper
+function addPoint(chart,label,value){
+  chart.data.labels.push(label);
+  chart.data.datasets[0].data.push(value);
+  if(chart.data.labels.length>MAX_POINTS){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
+  chart.update();
 }
 
 function updateUI(js) {
@@ -468,21 +609,20 @@ function updateUI(js) {
       tlsTable.appendChild(tr);
    });
  }
+
+   // Market (only if tab visible)
+  if(!document.getElementById('tab-market').classList.contains('hidden')){
+    updateMarket(js.market);
+  }
+
   // --- Updated Timestamp ---
   document.getElementById('updated').textContent = new Date().toLocaleTimeString();
-}
-
-
-function addPoint(chart, label, value){
-  chart.data.labels.push(label);
-  chart.data.datasets[0].data.push(value);
-  if(chart.data.labels.length>MAX_POINTS){ chart.data.labels.shift(); chart.data.datasets[0].data.shift(); }
-  chart.update();
 }
 
 // poll
 setInterval(fetchStats, POLL_INTERVAL_MS);
 fetchStats();
+
 </script>
 </body>
 </html>

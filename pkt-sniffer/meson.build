@@ -87,7 +87,14 @@ ai_src = files(
   'ai/placeholder.c',
 )
 
-all_src = engine_src + parser_src + stats_src + utils_src + ai_src + files(
+market_src = files(
+  'parsers/market/parse_fix.c',
+  'parsers/market/parse_itch.c',
+  'parsers/market/parse_sbe.c',
+  'parsers/market/parse_data.c',
+)
+
+all_src = engine_src + parser_src + stats_src + utils_src + ai_src +  market_src + files(
   'main.c',
   'cli.c',
 )
@@ -109,6 +116,20 @@ executable('pkt-sniffer',
            include_directories: inc,
            dependencies: deps,
            install: true)
+
+# --- Synthetic test executables ---
+synthetic_src = engine_src + parser_src + stats_src + utils_src + ai_src + market_src + files(
+  'parsers/market/gen_fix.c',
+  'parsers/market/gen_itch.c',
+  'parsers/market/gen_sbe.c',
+  'parsers/market/gen_main.c',
+)
+
+executable('synthetic', synthetic_src,
+           include_directories: inc,
+           dependencies: deps)
+
+
 
 # --- Build-time hints ---
 message('==========================================================')

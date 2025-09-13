@@ -19,6 +19,7 @@
 #define DBG_ARP       (1 << 10)
 #define DBG_IPFRAG    (1 << 11)
 #define DBG_DPDK      (1 << 12)
+#define DBG_APP       (1 << 13)
 
 // Global debug mask (set at runtime)
 extern unsigned int DEBUG_MASK;
@@ -37,6 +38,7 @@ extern unsigned int DEBUG_MASK;
 #define COLOR_DNS     "\033[93m"   // bright yellow
 #define COLOR_DHCP    "\033[92m"   // bright green
 #define COLOR_ARP     "\033[90m"   // bright gray (stands out, not too flashy)
+#define COLOR_APP     "\033[97m"   // bright white for application-level protocols (FIX/ITCH/SBE)
 
 
 // Standard debug logging

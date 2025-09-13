@@ -9,6 +9,37 @@
 #include "utils/talkers.h"
 #include "sniffer_proto.h"
 #include "stats/stats_json.h"
+#include "parsers/market/parse_data.h"
+
+void json_add_market(struct json_object *root)
+{
+    market_data_view *view = market_view_get();
+    if (!view || view->count == 0) return;
+
+    struct json_object *arr = json_object_new_array();
+    for (size_t i = 0; i < view->count; i++) {
+        market_msg_t *m = &view->msgs[i];
+        struct json_object *obj = json_object_new_object();
+
+        json_object_object_add(obj, "type", json_object_new_string(m->type));
+        json_object_object_add(obj, "protocol", json_object_new_string(m->protocol));
+        json_object_object_add(obj, "symbol", json_object_new_string(m->symbol));
+        json_object_object_add(obj, "price", json_object_new_double(m->price));
+        json_object_object_add(obj, "bid_price", json_object_new_double(m->bid_price));
+        json_object_object_add(obj, "ask_price", json_object_new_double(m->ask_price));
+        json_object_object_add(obj, "qty", json_object_new_int64(m->quantity));
+        json_object_object_add(obj, "side", json_object_new_string(&m->side));
+        json_object_object_add(obj, "timestamp", json_object_new_int64(m->timestamp));
+        json_object_object_add(obj, "seq_num", json_object_new_int64(m->seq_num));
+        json_object_object_add(obj, "exchange", json_object_new_string(m->exchange));
+        json_object_object_add(obj, "order_id", json_object_new_string(m->order_id));
+        json_object_object_add(obj, "exec_id", json_object_new_string(m->exec_id));
+        json_object_object_add(obj, "order_type", json_object_new_string(&m->order_type));
+        json_object_array_add(arr, obj);
+    }
+
+    json_object_object_add(root, "market", arr);
+}
 
 struct json_object *stats_build_json(void) {
     struct json_object *root = json_object_new_object();
@@ -288,6 +319,8 @@ struct json_object *stats_build_json(void) {
     json_object_object_add(cum, "pkts",  json_object_new_int64(stats_get_total_pkts()));
     json_object_object_add(cum, "bytes", json_object_new_int64(stats_get_total_bytes()));
     json_object_object_add(root, "cumulative", cum);
+
+    json_add_market(root);
 
     return root;
 }

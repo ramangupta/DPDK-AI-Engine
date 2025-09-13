@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+// L7 protocol identifiers
+#define L7_HTTP  1
+#define L7_TLS   2
+#define L7_FIX   3
+#define L7_ITCH  4
+#define L7_SBE   5
+
 static inline const char *proto_name(uint8_t proto) {
     switch (proto) {
         case 0:   return "HOPOPT";          // IPv6 Hop-by-Hop Option

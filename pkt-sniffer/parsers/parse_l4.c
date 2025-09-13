@@ -9,12 +9,16 @@
 #include "utils/utils.h"
 #include "stats/stats.h"
 #include "utils/flows.h"
+#include "sniffer_proto.h"
 #include "parsers/parse_l4.h"
 #include "parsers/parse_dns.h"
 #include "parsers/parse_dhcp.h"
 #include "parsers/parse_http.h"
 #include "parsers/parse_tls.h"
 #include "parsers/tcp_reass.h"
+
+#include "parsers/market/parse_data.h"
+
 
 static const char* icmpv4_type_name(uint8_t t) {
     switch (t) {
@@ -170,19 +174,18 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
                                  const uint8_t *data, uint32_t len,
                                  time_t ts, void *user_ctx)
 {
-
-    PARSER_LOG_LAYER("TCP", COLOR_TCP, "TCP flow %s:%u -> %s:%u | dir=%d | ts=%ld | len=%u\n",
-            tcp_flow_src_ip(flow), tcp_flow_src_port(flow),
-            tcp_flow_dst_ip(flow), tcp_flow_dst_port(flow),
-            dir, ts, len);
+    PARSER_LOG_LAYER("TCP", COLOR_TCP,
+        "TCP flow %s:%u -> %s:%u | dir=%d | ts=%ld | len=%u\n",
+        tcp_flow_src_ip(flow), tcp_flow_src_port(flow),
+        tcp_flow_dst_ip(flow), tcp_flow_dst_port(flow),
+        dir, ts, len);
 
     if (len > 0) {
-        DEBUG_LOG(DBG_TCP,"  First bytes: ");
+        DEBUG_LOG(DBG_TCP, "  First bytes: ");
         for (uint32_t i = 0; i < (len < 16 ? len : 16); i++) {
-            DEBUG_LOG(DBG_TCP,"%02x ", data[i]);
+            DEBUG_LOG(DBG_TCP, "%02x ", data[i]);
         }
     }
-
 
     if (len == 0) return;
 
@@ -191,7 +194,7 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
     app_pv.data = (uint8_t*)data;
     app_pv.len  = len;
 
-    /// Fill src/dst IPs and ports based on direction
+    // Fill src/dst IPs and ports based on direction
     if (dir == 0) {
         snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", tcp_flow_src_ip(flow));
         snprintf(app_pv.dst_ip, sizeof(app_pv.dst_ip), "%s", tcp_flow_dst_ip(flow));
@@ -204,38 +207,65 @@ static void parse_tcp_deliver_cb(tcp_flow_t *flow, int dir,
         app_pv.dst_port = tcp_flow_src_port(flow);
     }
 
-
-    // Future: set src/dst ports + IP strings for richer logging
-    // e.g., snprintf(app_pv.src_ip, sizeof(app_pv.src_ip), "%s", flow->src_ip);
-
-    // Heuristic: TLS vs HTTP
-
-    DEBUG_LOG(DBG_TCP,"%.*s\n----\n", (int)app_pv.len, (const char*)app_pv.data);
+    DEBUG_LOG(DBG_TCP, "%.*s\n----\n", (int)app_pv.len, (const char*)app_pv.data);
 
     int l7_proto = tcp_flow_l7_proto(flow);
 
     if (l7_proto == 0) {
-        if (data[0] == 0x16 && len >= 5) {
-            tcp_flow_set_l7_proto(flow, 2); // TLS
+        // --- Stock protocols (by port heuristic) ---
+        if (app_pv.src_port == 5001 || app_pv.dst_port == 5001) {
+            tcp_flow_set_l7_proto(flow, L7_FIX);
+            PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Delivering to FIX parser\n");
+            parse_fix(&app_pv);
+        }
+        else if (app_pv.src_port == 5002 || app_pv.dst_port == 5002) {
+            tcp_flow_set_l7_proto(flow, L7_ITCH);
+            PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Delivering to ITCH parser\n");
+            parse_itch(&app_pv);
+        }
+        else if (app_pv.src_port == 5003 || app_pv.dst_port == 5003) {
+            tcp_flow_set_l7_proto(flow, L7_SBE);
+            PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Delivering to SBE parser\n");
+            parse_sbe(&app_pv);
+        }
+        // --- Existing HTTP/TLS heuristics ---
+        else if (data[0] == 0x16 && len >= 5) {
+            tcp_flow_set_l7_proto(flow, L7_TLS);
             PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Delivering to TLS parser\n");
             parse_tls(&app_pv);
-        } else if ((data[0] >= 'A' && data[0] <= 'Z') || (len >= 5 && memcmp(data, "HTTP/", 5) == 0)) {
-            tcp_flow_set_l7_proto(flow, 1); // HTTP
+        }
+        else if ((data[0] >= 'A' && data[0] <= 'Z') ||
+                 (len >= 5 && memcmp(data, "HTTP/", 5) == 0)) {
+            tcp_flow_set_l7_proto(flow, L7_HTTP);
             PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Delivering to HTTP parser\n");
             parse_http(&app_pv);
-        } else {
-            PARSER_LOG_LAYER("TCP", COLOR_TCP, "  → Unrecognized L7 payload (not HTTP/TLS)\n");
+        }
+        else {
+            PARSER_LOG_LAYER("TCP", COLOR_TCP,
+                "  → Unrecognized L7 payload (not HTTP/TLS/Stock)\n");
             global_stats.drop_unknown_l7++;
             global_stats.dropped++;
         }
-    } else if (l7_proto == 1) {
+    }
+    else if (l7_proto == L7_HTTP) {
         DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to HTTP parser\n");
-        // HTTP already identified
         parse_http(&app_pv);
-    } else if (l7_proto == 2) {
+    }
+    else if (l7_proto == L7_TLS) {
         DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to TLS parser\n");
-        // TLS already identified
         parse_tls(&app_pv);
+    }
+    else if (l7_proto == L7_FIX) {
+        DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to FIX parser\n");
+        parse_fix(&app_pv);
+    }
+    else if (l7_proto == L7_ITCH) {
+        DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to ITCH parser\n");
+        parse_itch(&app_pv);
+    }
+    else if (l7_proto == L7_SBE) {
+        DEBUG_LOG(DBG_TCP, "  → Same flow cont ... Delivering to SBE parser\n");
+        parse_sbe(&app_pv);
     }
 }
 

@@ -17,15 +17,6 @@ extern atomic_ulong tcp_seg_pool_exhausted;   // count of dropped segments due t
 /* Opaque tcp_flow type exposed to callers */
 typedef struct tcp_flow tcp_flow_t;
 
-/* TCP segment node (exported because it may be used elsewhere for debug) */
-typedef struct tcp_seg {
-    uint32_t seq;            /* host order */
-    uint32_t len;
-    uint8_t *data;
-    time_t ts;
-    struct tcp_seg *next;
-} tcp_seg_t;
-
 /* deliver callback invoked when contiguous bytes are ready.
  * dir: 0 = src->dst (initiator → responder), 1 = dst->src
  * NOTE: 'flow' pointer is valid during callback but callers must not free it there.

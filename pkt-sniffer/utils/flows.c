@@ -124,9 +124,20 @@ void flow_update(const flow_key_t *key, uint16_t pktlen)
     uint64_t now = now_tsc();
 #ifdef USE_DPDK
     uint64_t hz = rte_get_tsc_hz();
-    now = (now * 1000000000ULL) / hz;  // convert to ns
+    if (hz == 0) {
+        // fallback: monotonic clock in ns
+        struct timespec ts;
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+            now = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+        } else {
+            now = 0;
+        }
+    } else {
+        __int128 tmp = (__int128)now * 1000000000ULL;
+        now = (uint64_t)(tmp / hz);
+    }
 #endif
-
+    
     for (int i = 0; i < flow_count; i++) {
         if (flow_table[i].in_use && flow_key_equal(&flow_table[i].key, key)) {
             flow_table[i].pkts++;

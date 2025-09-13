@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    // DEBUG_MASK = DBG_DPDK;
+    DEBUG_MASK = DBG_PARSER | DBG_TCP | DBG_TCP_REASS; 
 
     app_loop();
 

@@ -45,12 +45,24 @@ static inline uint64_t tsc_to_ns(uint64_t tsc)
 {
 #ifdef USE_DPDK
     uint64_t hz = rte_get_tsc_hz();
-    return (tsc * 1000000000ULL) / hz;
+    if (hz == 0) {
+        // Fallback: if rte_get_tsc_hz() is not initialized, avoid crash
+        struct timespec ts;
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+            return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+        }
+        return 0; // last resort
+    }
+
+    // Use 128-bit math to prevent overflow in tsc * 1e9
+    __int128 tmp = (__int128)tsc * 1000000000ULL;
+    return (uint64_t)(tmp / hz);
 #else
     // on non-DPDK builds now_tsc() already returns ns
     return tsc;
 #endif
 }
+
 
 static void report_ipv4_drop(uint16_t id, const char *reason) {
     // stdout so the harness always sees it (stderr still has DLOGs)
