@@ -17,7 +17,8 @@ typedef struct {
     char side;              // '1' = buy, '2' = sell, etc.
     uint64_t timestamp;     // msg timestamp in ms
     uint32_t seq_num;       // feed sequence number
-
+    uint64_t day_volume;   // cumulative daily traded volume
+    
     // optional / extended fields
     char exchange[16];      // multi-exchange support
     char order_id[32];      // order reference
@@ -27,6 +28,23 @@ typedef struct {
     double p95_price;       // analytics
     double p99_price;       // analytics
     double avg_price;       // analytics
+
+    uint64_t open_interest;
+    int cci;
+    float atr;
+
+    // --- new Python fields (5001-5011) ---
+    double day_open;
+    double day_high;
+    double day_low;
+    double prev_close;
+    double high_52wk;
+    double low_52wk;
+    double avg_volume_10d;
+    double avg_volume_3m;
+    double market_cap;
+    double pe_ratio;
+    double eps;
 } market_msg_t;
 
 typedef struct {

@@ -82,8 +82,8 @@ static void send_ipv4_fragments(flow_ctx_t *flow,
 int main(int argc, char **argv) 
 {
     srand((unsigned)time(NULL));
-    DEBUG_MASK = DBG_PARSER | DBG_APP | DBG_TCP | DBG_TCP_REASS;
-
+    // DEBUG_MASK = DBG_PARSER | DBG_APP | DBG_TCP | DBG_TCP_REASS;
+    
     if (argc < 2) {
         fprintf(stderr, "Usage: %s [fix|itch|sbe|all]\n", argv[0]);
         return 1;

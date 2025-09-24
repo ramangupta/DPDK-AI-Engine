@@ -8,6 +8,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- TradingView Widget -->
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     body { background: #0f172a; color: #e6eef8; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace; }
@@ -236,38 +239,217 @@
       </div>
     </div>
   </div>
-
   <!-- MARKET DATA TAB -->
   <div id="tab-market" class="tab-content hidden">
     <div class="p-4 bg-slate-800 rounded-2xl shadow">
-      <h2 class="text-lg font-semibold mb-3">Market Data</h2>
-      <div class="overflow-auto max-h-96 min-h-[200px]">
-        <table class="w-full text-sm">
-          <thead class="text-slate-300 text-xs border-b border-slate-700">
-            <tr>
-              <th class="px-2 py-1 text-left">Symbol</th>
-              <th class="px-2 py-1 text-right">Price</th>
-              <th class="px-2 py-1 text-right">Bid</th>
-              <th class="px-2 py-1 text-right">Ask</th>
-              <th class="px-2 py-1 text-right">Qty</th>
-              <th class="px-2 py-1 text-center">Side</th>
-              <th class="px-2 py-1 text-left">Exchange</th>
-              <th class="px-2 py-1 text-right">Change %</th>
-            </tr>
-          </thead>
-          <tbody id="market-table" class="text-slate-200">
-            <tr>
-              <td colspan="4" class="px-2 py-4 text-center text-slate-500">No market data</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <canvas id="market-chart" height="200" class="mt-6"></canvas>
-    </div>
-  </div>
-</main>
+      <h2 class="flex justify-between items-center text-lg font-semibold mb-1 mt-4 bg-orange-600 text-white px-4 py-1 rounded">
+        <span>Market Data</span>
+        <span id="symbolCount" class="text-sm font-normal"></span>
+      </h2>
 
+      <div class="p-4 bg-slate-800 rounded-2xl shadow border border-orange-700">
+        <div class="mb-3 flex items-center justify-between gap-2">
+          <!-- Filter by State (Left) -->
+          <div class="flex items-center gap-2">
+            <label for="state-filter" class="text-sm">Filter by State:</label>
+            <select id="state-filter" class="text-sm p-1 rounded bg-slate-700 text-white">
+              <option value="">All</option>
+              <option value="0">AT RESISTANCE</option>
+              <option value="1">AT SUPPORT</option>
+              <option value="2">BREAKOUT</option>
+              <option value="3">RANGE-BOUND</option>
+              <option value="4">UNDETERMINED</option> 
+            </select>
+          </div>
+
+          <!-- Select Categories (Right) -->
+          <div class="flex items-center gap-2 relative">
+            <label class="text-sm">Select Categories:</label>
+            <button id="category-dropdown-btn" class="text-sm p-1 rounded bg-slate-700 text-white">
+              Categories
+            </button>
+            <div id="category-dropdown" class="absolute right-0 mt-1 w-48 max-h-60 overflow-auto bg-slate-800 text-white border border-slate-600 rounded shadow-lg hidden z-50">
+              <div class="px-2 py-1">
+                <label class="flex items-center gap-2">
+                  <input type="checkbox" class="category-checkbox" value="-1" id="category-all">
+                  <span>All</span>
+                </label>
+                </div>
+                <div class="px-2 py-1">
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="0">
+                    <span>Index</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="1">
+                    <span>Auto</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="2">
+                    <span>Capital Goods</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="3">
+                    <span>Chemicals</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="4">
+                    <span>Construction</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="5">
+                    <span>Construction Materials</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="6">
+                    <span>Consumer Durables</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="7">
+                    <span>Consumer Services</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="8">
+                    <span>FMCG</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="9">
+                    <span>Private Banks</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="10">
+                    <span>Public Banks</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="11">
+                    <span>Financial Services</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="12">
+                    <span>HealthCare</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="13">
+                    <span>Information Technology</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="14">
+                    <span>Metals & Mining</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="15">
+                    <span>Oil & Gas</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="16">
+                    <span>Power</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="17">
+                    <span>Realty</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="18">
+                    <span>Services</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="19">
+                    <span>TeleCommunications</span>
+                  </label>
+                  <label class="flex items-center gap-2">
+                    <input type="checkbox" class="category-checkbox" value="20">
+                    <span>Textiles</span>
+                  </label>
+                <!-- Repeat for other categories -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Stage Tabs -->
+      <div class="flex border-b border-slate-600 mb-0">
+        <button 
+          id="stage1-tab" 
+          class="px-4 py-2 text-sm font-medium text-white bg-purple-700 rounded-t">
+          Stage 1
+        </button>
+        <button 
+          id="stage2-tab" 
+          class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white">
+          Stage 2
+        </button>
+      </div>
+
+      <!-- TradingView Chart goes here -->
+      
+      <!-- Stage 1 Table -->
+      <div id="stage1-content">
+        <div class="overflow-auto max-h-[800px] min-h-[400px]">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-purple-700 text-white text-xs border-b border-emerald-900 z-10">
+              <tr>
+                <th class="px-2 py-1 text-left">Symbol</th>
+                  <th class="px-2 py-1 text-right">Price</th>
+                  <th class="px-2 py-1 text-right">OHLC</th> <!-- Day Open / High / Low / Prev Close -->
+                  <th class="px-2 py-1 text-right">52W High</th>
+                  <th class="px-2 py-1 text-right">52W Low</th>
+                  <th class="px-2 py-1 text-right">Resistance</th>
+                  <th class="px-2 py-1 text-right">Support</th>
+                  <th class="px-2 py-1 text-right">RS%</th>
+                  <th class="px-2 py-1 text-right">ATR</th>
+                  <th class="px-2 py-1 text-right">State</th>
+                  <th class="px-2 py-1 text-right">Vol (Cur/1D/2D/3D)</th>
+                  <th class="px-2 py-1 text-right">Avg Vol 10D</th>
+                  <th class="px-2 py-1 text-right">Avg Vol 3M</th>
+              </tr>
+            </thead>
+            <tbody id="market-table" class="text-slate-200">
+              <tr>
+                <td colspan="4" class="px-2 py-4 text-center text-slate-500">No market data</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>  
+      </div>
+  
+      <!-- Stage 2 Content (starts here correctly) -->
+      <div id="stage2-content" class="hidden mt-3">
+        <h2 class="text-lg font-semibold mb-3 text-white">Stage 2 Dashboard</h2>
+        <div class="overflow-auto max-h-[800px] min-h-[400px] border border-orange-700 rounded p-2">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-purple-700 text-white text-xs border-b border-emerald-900 z-10">
+              <tr>
+                <th class="px-2 py-1 text-left">Symbol</th>
+                <th class="px-2 py-1 text-right">Price</th>
+                <th class="px-2 py-1 text-right">Support</th>
+                <th class="px-2 py-1 text-right">Resistance</th>
+                <th class="px-2 py-1 text-right">Delay Alert</th>
+                <th class="px-2 py-1 text-right">Burst Alert</th>
+                <th class="px-2 py-1 text-left">Remark</th>
+              </tr>
+            </thead>
+            <tbody id="stage2-table" class="text-slate-200">
+              <tr>
+                <td colspan="7" class="px-2 py-4 text-center text-slate-500">Stage 2 filtering not yet applied</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div> <!-- end stage2-content -->
+    </div>
+  </div> <!-- end tab-market -->
+</main>
+ 
 <footer class="mt-8 text-sm text-slate-400">Updated: <span id="updated">-</span></footer>
+
+<!-- TradingView Modal -->
+<div id="tv-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+  <div class="bg-slate-900 p-4 rounded-lg w-[90%] max-w-4xl">
+    <button id="close-tv" class="mb-2 px-3 py-1 bg-red-600 rounded text-white">Close</button>
+    <div id="tv-chart" style="height:400px; width:100%;"></div>
+  </div>
+</div>
 
 <script>
 // Configuration
@@ -278,6 +460,34 @@ let lastStats = null;
 
 function fmtBytes(n) { if (n==null) return '-'; const u=['B','KB','MB','GB']; let i=0; while(n>=1024 && i<u.length-1){n/=1024;i++;} return n.toFixed(i?2:0)+' '+u[i]; }
 function fmtNum(n){ return (n==null) ? '-' : n.toLocaleString(); }
+
+const symbolMap = {
+  "ABB": "NSE:ABB",
+  "BSE": "BSE:BSE",
+  "CDSL": "NSE:CDSL",
+  "HAL": "NSE:HAL",
+  "IDEA": "NSE:IDEA",
+  "IEX": "NSE:IEX",
+  "IGL": "NSE:IGL",
+  "NCC": "NSE:NCC",
+  "NMDC": "NSE:NMDC",
+  "PFC": "NSE:PFC",
+  "SAIL": "NSE:SAIL",
+  "SIEMENS": "NSE:SIEMENS",
+  "TCS": "NSE:TCS",
+  "UPL": "NSE:UPL",
+  "BEL": "NSE:BEL",
+  "BDL": "NSE:BDL",
+  "INFY": "NSE:INFY",
+  "KEI": "NSE:KEI",
+  "MCX": "MCX:MCX",
+  "OIL": "NSE:OIL",
+  "PRESTIGE": "NSE:PRESTIGE",
+  "TITAN": "NSE:TITAN",
+  "IOC": "NSE:IOC",
+  "RVNL": "NSE:RVNL",
+  "BAJAJ-AUTO": "NSE:BAJAJ-AUTO",
+};
 
 // Charts
 const lineCtx = document.getElementById('chart-line').getContext('2d');
@@ -319,12 +529,25 @@ let summaryPieChart = new Chart(pieCtx, {
   }
 });
 
+// Market Chart (bar for volume)
+let marketChart = null;
+const marketCanvas = document.getElementById('market-chart');
+if (marketCanvas) {
+  marketChart = new Chart(marketCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Volume', data: [], backgroundColor: 'rgba(250,204,21,0.7)' }] },
+    options: { animation: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+
+
 // Market Chart
-const marketChart = new Chart(document.getElementById('market-chart').getContext('2d'), {
-  type:'line',
-  data:{labels:[], datasets:[{label:'Price', data:[], borderColor:'#facc15', backgroundColor:'rgba(250,204,21,0.2)', tension:0.3}]},
-  options:{animation:false, plugins:{legend:{display:false}}}
-});
+//const marketChart = new Chart(document.getElementById('market-chart').getContext('2d'), {
+ // type:'line',
+//  data:{labels:[], datasets:[{label:'Price', data:[], borderColor:'#facc15', backgroundColor:'rgba(250,204,21,0.2)', tension:0.3}]},
+//  options:{animation:false, plugins:{legend:{display:false}}}
+//});
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -337,77 +560,438 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.remove('bg-slate-700'); btn.classList.add('bg-blue-600');
 
     if(tabId==='tab-market' && lastStats){
-      updateMarket(lastStats.market);
-      marketChart.resize();
+      updateMarket(lastStats.market, lastStats.alerts);
     }
   });
 });
 
+function formatTimestamp(ts_ms) {
+    console.log("formatTimestamp input:", ts_ms);
+    try {
+        const n = Number(ts_ms);
+        const d = new Date(n);
+        console.log("Converted date:", d.toString());
+        return d.toLocaleString("en-IN", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+        }) + "." + String(d.getMilliseconds()).padStart(3, "0");
+    } catch (e) {
+        console.error("formatTimestamp error", e);
+        return "-";
+    }
+}
+
 const prevPrices = {}; // store previous price per symbol
 
-function updateMarket(market){
-  const tbody = document.getElementById('market-table');
-  if(!tbody) return;
+const STATE_MAP = {
+    0: { text: "AT RESISTANCE",      class: "text-yellow-400" },
+    1: { text: "AT SUPPORT",         class: "text-green-400" },
+    2: { text: "BREAKOUT",           class: "text-red-400" },
+    3: { text: "RANGE-BOUND",        class: "text-orange-400" },
+    4: { text: "UNDETERMINED",       class: "text-slate-400" }
+};
 
-  tbody.innerHTML = '';
-  if(!market || market.length===0){
-    tbody.innerHTML = `<tr><td colspan="8" class="px-2 py-4 text-center text-slate-500">No market data</td></tr>`;
-    marketChart.data.labels = [];
-    marketChart.data.datasets[0].data = [];
-    marketChart.update('none');
+// Helper function to format volumes in K (thousands)
+function formatK(num) {
+    if (num === undefined || num === null || isNaN(num)) return '-';
+    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
+    if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
+    return num.toString();
+}
+
+// Helper function to render mini histogram (bottom aligned)
+function renderVolHistogram(vol) {
+    if (!vol || !vol.length) return '';
+    const maxVol = Math.max(...vol);
+    if (maxVol <= 0) return '';
+
+    const minHeight = 3;   // px
+    const maxHeight = 24;  // px (container height)
+
+    return `
+      <div class="flex items-end gap-1 mt-1 h-[24px]">
+        ${vol.map((v, i) => {
+            const h = Math.max(minHeight, (v / maxVol) * maxHeight);
+            const color = i === 0 ? "bg-green-400" : "bg-yellow-400"; // latest in green
+            return `<div class="${color} rounded-sm" style="width:5px; height:${h}px;"></div>`;
+        }).join('')}
+      </div>
+    `;
+}
+
+// Keep last prices in memory
+const lastPrices = {};
+
+function getPriceInfo(price, prev_close) {
+    if (price === undefined || prev_close === undefined || prev_close === 0) {
+        return { cls: "text-slate-200", changePct: null, changePts: null, price: '-' };
+    }
+
+    const changePts = price - prev_close;
+    const changePct = (changePts / prev_close) * 100;
+
+    let cls = "text-slate-200";
+    if (changePts > 0) cls = "text-green-400";
+    else if (changePts < 0) cls = "text-red-400";
+
+    return { 
+        cls, 
+        changePct: changePct.toFixed(2),  // percentage change
+        changePts: changePts.toFixed(2),  // points change
+        price: price.toFixed(2)
+    };
+}
+
+function getPctChange(price, ref) {
+  if (price === undefined || ref === undefined || ref === 0) return null;
+  return ((price - ref) / ref * 100).toFixed(2);
+}
+
+const dropdownBtn = document.getElementById("category-dropdown-btn");
+const dropdown = document.getElementById("category-dropdown");
+const allCheckbox = document.getElementById("category-all");
+
+dropdownBtn.addEventListener("click", (e) => {
+  dropdown.classList.toggle("hidden");
+});
+
+// Close dropdown if clicked outside
+document.addEventListener("click", (e) => {
+  if (!dropdown.contains(e.target) && !dropdownBtn.contains(e.target)) {
+    dropdown.classList.add("hidden");
+  }
+});
+
+// Checkbox logic
+document.querySelectorAll(".category-checkbox").forEach(cb => {
+  cb.addEventListener("change", () => {
+    if(cb === allCheckbox) {
+      // Toggle all checkboxes
+      document.querySelectorAll(".category-checkbox").forEach(c => c.checked = allCheckbox.checked);
+    } else {
+      // If any individual checkbox is unchecked, uncheck "All"
+      if(!cb.checked) allCheckbox.checked = false;
+
+      // If all individual checkboxes are checked, check "All"
+      const allInd = Array.from(document.querySelectorAll(".category-checkbox:not(#category-all)"));
+      if(allInd.every(c => c.checked)) allCheckbox.checked = true;
+    }
+    updateMarket(window.marketData, window.alertData);
+  });
+});
+
+// Make "All" checked initially
+allCheckbox.checked = true;
+
+function getSelectedCategories() {
+  const selected = Array.from(document.querySelectorAll(".category-checkbox:checked"))
+                        .map(cb => parseInt(cb.value));
+
+  // If "All" is checked or nothing else selected, return all category values
+  if(selected.includes(-1) || selected.length === 0){
+      return Array.from(document.querySelectorAll(".category-checkbox:not(#category-all)")).map(cb => parseInt(cb.value));
+  }
+
+  return selected;
+}
+
+// Ensure you have these globals somewhere in your app:
+let stage1Source = [];    // filtered Stage 1 market (updateMarket should set this)
+let stage2Source = [];    // full fetched market (updateMarket should set this)
+
+// Helper that Stage 2 rendering uses:
+function getStage2Stocks() {
+  // Stage 2 should be based on full feed, not Stage 1 filters.
+  // Make sure updateMarket sets stage2Source = [...market] at top.
+  if (!stage2Source || stage2Source.length === 0) return [];
+  return stage2Source.filter(item => item.state !== 3 && item.state !== 4);
+}
+
+// Escape HTML to avoid breaking input
+function escapeHTML(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Render Stage 2 rows (reads from stage2Source)
+// Render Stage 2 rows (reads from stage2Source)
+function renderStage2(alerts) {
+  const tbody = document.getElementById("stage2-table");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  const stocks = getStage2Stocks();
+
+  // 🔹 Update count badge
+  const countEl = document.getElementById("symbolCount");
+  if (countEl) {
+    countEl.textContent = `Symbols: ${stocks.length}`;
+  }
+
+
+  if (!stocks.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="px-2 py-4 text-center text-slate-500">No Stage 2 stocks</td>
+      </tr>`;
     return;
   }
 
-  // Find max qty for scaling volume bars
-  const maxQty = Math.max(...market.map(m => m.qty), 1);
+  // 🔹 Build alert lookup { symbol -> { protocol, burst, delay } }
+  const alertMap = {};
+  if (alerts) {
+    alerts.forEach(a => {
+      if (!alertMap[a.symbol]) alertMap[a.symbol] = {};
+      alertMap[a.symbol][a.type.toLowerCase()] = a.msg; // normalize key
+    });
+  }
 
-  marketChart.data.labels = [];
-  marketChart.data.datasets[0].data = [];
+  stocks.forEach(item => {
+    const stateInfo = STATE_MAP[item.state] || { text: "-", class: "" };
+    const support =
+      item.support !== undefined && item.support !== null
+        ? Number(item.support).toFixed(2)
+        : "-";
+    const resistance =
+      item.resistance !== undefined && item.resistance !== null
+        ? Number(item.resistance).toFixed(2)
+        : "-";
+    const rs_pct =
+      item.rs_diff_pct !== undefined && item.rs_diff_pct !== null
+        ? Number(item.rs_diff_pct).toFixed(2)
+        : "-";
 
-  market.forEach(msg => {
-    const symbol = msg.symbol;
+    const burstMsg = alertMap[item.symbol]?.burst || ""; // ⚡ Burst alert
+    const burstClass = burstMsg ? "bg-red-600 text-white font-semibold" : "";
 
-    // Calculate Change %
-    let changePercent = '-';
-    if(prevPrices[symbol] !== undefined && prevPrices[symbol] !== 0){
-      changePercent = ((msg.price - prevPrices[symbol]) / prevPrices[symbol] * 100).toFixed(2);
-    }
-    prevPrices[symbol] = msg.price;
+    const delayMsg = alertMap[item.symbol]?.delay || ""; // ⏳ Delay alert
+    const delayClass = delayMsg ? "text-red-400 font-semibold" : "";
 
-    // Map side to text + color
-    let sideText = '-';
-    let sideClass = '';
-    if(msg.side === '1') { sideText = 'Buy'; sideClass = 'text-green-400'; }
-    else if(msg.side === '2') { sideText = 'Sell'; sideClass = 'text-red-400'; }
-    else { sideText = 'Unknown'; sideClass = 'text-slate-400'; }
+    const remark = item.remark || "";  // 🔹 use backend-provided remark
+    const safeRemark = escapeHTML(remark); // optional: prevent HTML injection
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="px-2 py-1 w-24">${symbol}</td>
-      <td class="px-2 py-1 w-20 text-right">${msg.price.toFixed(2)}</td>
-      <td class="px-2 py-1 w-20 text-right">${msg.bid_price.toFixed(2)}</td>
-      <td class="px-2 py-1 w-20 text-right">${msg.ask_price.toFixed(2)}</td>
-      <td class="px-2 py-1 w-32 text-right">
-        <div class="flex items-center">
-          <span class="mr-2">${msg.qty}</span>
-          <div class="h-2 bg-yellow-300 rounded" style="width:${Math.min(msg.qty / maxQty * 100,100)}%"></div>
-        </div>
-      </td>
-      <td class="px-2 py-1 w-16 text-center ${sideClass}">${sideText}</td>
-      <td class="px-2 py-1 w-24 text-left">${msg.exchange}/${msg.protocol}</td>
-      <td class="px-2 py-1 w-20 text-right ${changePercent >= 0 ? 'text-green-400' : 'text-red-400'}">${changePercent}</td>
+    tbody.innerHTML += `
+      <tr>
+        <td class="px-2 py-1">${item.symbol}</td>
+        <td class="px-2 py-1 text-right">${item.price !== undefined ? Number(item.price).toFixed(2) : "-"}</td>
+        <td class="px-2 py-1 text-right">${support}</td>
+        <td class="px-2 py-1 text-right">${resistance}</td>
+        <td class="px-2 py-1 text-right ${delayClass}">${delayMsg ? "⏳ " + delayMsg : ""}</td>
+        <td class="px-2 py-1 text-right ${burstClass}">${burstMsg ? "⚡ " + burstMsg : ""}</td>
+        <td class="px-2 py-1 text-left text-green-400">
+          ${safeRemark || "-"}
+        </td>
+      </tr>
     `;
-    tbody.appendChild(tr);
-
-    // Update chart
-    marketChart.data.labels.push(symbol);
-    marketChart.data.datasets[0].data.push(msg.price);
   });
-
-  marketChart.update('none');
 }
 
 
+// Tab switching
+document.getElementById("stage1-tab").addEventListener("click", () => {
+  document.getElementById("stage1-content").classList.remove("hidden");
+  document.getElementById("stage2-content").classList.add("hidden");
+
+  document.getElementById("stage1-tab").classList.add("bg-purple-700","text-white");
+  document.getElementById("stage1-tab").classList.remove("bg-slate-700");
+
+  document.getElementById("stage2-tab").classList.remove("bg-purple-700","text-white");
+  document.getElementById("stage2-tab").classList.add("bg-slate-700");
+});
+
+document.getElementById("stage2-tab").addEventListener("click", () => {
+  document.getElementById("stage2-content").classList.remove("hidden");
+  document.getElementById("stage1-content").classList.add("hidden");
+
+  document.getElementById("stage2-tab").classList.add("bg-purple-700","text-white");
+  document.getElementById("stage2-tab").classList.remove("bg-slate-700");
+
+  document.getElementById("stage1-tab").classList.remove("bg-purple-700","text-white");
+  document.getElementById("stage1-tab").classList.add("bg-slate-700");
+
+  // render Stage 2 with the latest data
+  renderStage2();
+});
+
+
+// OPTIONAL: make Stage 2 auto-refresh when updateMarket is run and Stage 2 visible
+function refreshStage2IfVisible(alerts) {
+  if (!document.getElementById("stage2-content").classList.contains("hidden")) {
+    renderStage2(alerts);
+  }
+}
+
+function updateMarket(market, alerts) {
+    console.log("updateMarket called, market length:", market ? market.length : "null");
+
+    console.log("market array:", market);
+
+    if (!market || market.length === 0) {
+        // existing Stage 1 empty rendering
+        const tbody = document.getElementById('market-table');
+        if (tbody) {
+            tbody.innerHTML = `<tr>
+                <td colspan="12" class="px-2 py-4 text-center text-slate-500">No market data</td>
+            </tr>`;
+        }
+        return;
+    }
+
+    stage2Source = [...market];   // full feed
+
+    const tbody = document.getElementById('market-table');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const stateFilter = document.getElementById('state-filter').value;
+    if(stateFilter !== ''){
+      market = market.filter(m => String(m.state) === stateFilter);
+    }
+
+    market = market.filter(msg => /^[A-Z0-9.-]+$/.test(msg.symbol));
+
+    const filtered = market.filter(msg => {
+        const selectedCategories = getSelectedCategories();
+        if (selectedCategories.length > 0 && !selectedCategories.includes(msg.category)) {
+          return false;
+        }
+        // you can also apply state filter here if needed
+        return true;
+      });
+
+    stage1Source = filtered.slice();  // shallow copy of filtered data
+      
+    filtered.forEach(msg => {
+      const symbol = msg.symbol || '-';
+
+      // Price
+      const { cls: priceClass, changePct, changePts, price } = getPriceInfo(msg.price, msg.ohlc?.close);
+
+      // OHLC
+      const ohlc = msg.ohlc
+          ? `${msg.ohlc.open?.toFixed(2) || '-'} / ${msg.ohlc.high?.toFixed(2) || '-'} / ${msg.ohlc.low?.toFixed(2) || '-'} / ${msg.ohlc.close?.toFixed(2) || '-'}`
+          : '-';
+
+      // Support / Resistance / RS%
+      const support    = msg.support !== undefined ? msg.support.toFixed(2) : '-';
+      const resistance = msg.resistance !== undefined ? msg.resistance.toFixed(2) : '-';
+      const rs_diff    = msg.rs_diff_pct !== undefined ? msg.rs_diff_pct.toFixed(2) : '-';
+
+      // 52W High / Low with % diff
+      let high52 = "-", highPct = "-", highCls = "text-slate-400";
+      let low52 = "-", lowPct = "-", lowCls = "text-slate-400";
+
+      if (msg.high_52wk && msg.price) {
+          high52 = msg.high_52wk.toFixed(2);
+          highPct = (((msg.high_52wk - msg.price) / msg.high_52wk) * 100).toFixed(2);
+          highCls = (highPct > 30) ? "text-red-400" : (highPct < 10 ? "text-green-400" : "text-slate-400");
+      }
+
+      if (msg.low_52wk && msg.price) {
+          low52 = msg.low_52wk.toFixed(2);
+          lowPct = (((msg.price - msg.low_52wk) / msg.low_52wk) * 100).toFixed(2);
+          lowCls = (lowPct < 10) ? "text-green-400" : (lowPct > 30 ? "text-red-400" : "text-slate-400");
+      }
+
+      // State as string
+      const st = STATE_MAP[msg.state] || { text: "Unknown", class: "text-slate-400" };
+
+      // ATR
+      const atr = msg.atr !== undefined && msg.atr !== null ? msg.atr.toFixed(2) : '-';
+
+      // Volumes
+      const vol = Array.isArray(msg.vol) ? msg.vol : [];
+
+      // Avg Vols
+      const avg10d = msg.avg_vol_10d !== undefined ? formatK(msg.avg_vol_10d) : '-';
+      const avg3m  = msg.avg_vol_3m  !== undefined ? formatK(msg.avg_vol_3m)  : '-';
+
+      // Ensure vol array is not empty
+      const curVol = vol.length ? vol[0] : 0;
+
+      // % vs Avg Volumes
+      const pct10d = msg.avg_vol_10d > 0 ? getPctChange(curVol, msg.avg_vol_10d) : "-";
+      const pct3m  = msg.avg_vol_3m  > 0 ? getPctChange(curVol, msg.avg_vol_3m) : "-";
+
+      const tvSymbol = symbolMap[symbol] || symbol;
+
+      const tr = document.createElement('tr');
+      tr.className = "bg-slate-850 hover:bg-slate-700 transition-colors duration-150"; // same bg for all, subtle hover
+      tr.innerHTML = `
+          <td class="px-2 py-1 w-24">
+              <span class="text-white-800 underline cursor-pointer hover:text-blue-800 symbol-link" data-symbol="${tvSymbol}">
+                  ${symbol}
+              </span>
+          </td>
+          <td class="px-2 py-1 w-20 text-right ${priceClass}">
+            ${price}
+            ${changePts !== null ? `<sub class="ml-1 text-xs">
+              ${changePts > 0 ? '↑' : changePts < 0 ? '↓' : ''} ${changePts} (${changePct}%)
+            </sub>` : ""}
+          </td>
+
+          <td class="px-2 py-1 w-32 text-right">${ohlc}</td>
+          <td class="px-2 py-1 w-20 text-right ${highCls}">
+            ${high52}
+            ${highPct !== "-" ? `<sub class="ml-1 text-xs">${highPct}%</sub>` : ""}
+          </td>
+          <td class="px-2 py-1 w-20 text-right ${lowCls}">
+            ${low52}
+            ${lowPct !== "-" ? `<sub class="ml-1 text-xs">${lowPct}%</sub>` : ""}
+          </td>
+          <td class="px-2 py-1 w-20 text-right">${resistance}</td>
+          <td class="px-2 py-1 w-20 text-right">${support}</td>
+         
+          <td class="px-2 py-1 w-16 text-right">${rs_diff}</td>
+          <td class="px-2 py-1 w-20 text-right">
+            ${msg.atr !== undefined && msg.atr !== null ? msg.atr.toFixed(2) : '-'}
+          </td>
+          <td class="px-2 py-1 w-20 text-right ${st.class}">${st.text}</td>
+          <td class="px-2 py-1 w-32 text-right">
+              ${vol.length ? `<div>${vol.map(v => formatK(v)).join(' / ')}</div>` : '-'}
+              ${renderVolHistogram(vol)}
+          </td>
+          <td class="px-2 py-1 text-right">
+            ${avg10d}
+            ${pct10d !== "-" ? `<sub class="ml-1 text-xs ${pct10d >= 0 ? 'text-green-600' : 'text-red-600'}">${pct10d}%</sub>` : ""}
+          </td>
+          <td class="px-2 py-1 text-right">
+            ${avg3m}
+            ${pct3m !== "-" ? `<sub class="ml-1 text-xs ${pct3m >= 0 ? 'text-green-600' : 'text-red-600'}">${pct3m}%</sub>` : ""}
+          </td>
+      `;
+      tbody.appendChild(tr); 
+  });
+
+  // --- Add click listener only to symbol links AFTER rows are added ---
+  tbody.querySelectorAll('.symbol-link').forEach(el => {
+      el.addEventListener('click', (e) => {
+          e.stopPropagation(); // prevent row-level events if any
+          const symbol = el.dataset.symbol;
+          const row = el.closest("tr");
+
+          const support = parseFloat(row.cells[5].textContent) || undefined;
+          const resistance = parseFloat(row.cells[6].textContent) || undefined;
+
+          openTradingView(symbol, support, resistance); // your modal/chart fn
+      });
+  });
+
+  const rowCount = tbody.querySelectorAll("tr").length;
+  document.getElementById("symbolCount").textContent = `Symbols: ${rowCount}`;
+
+  refreshStage2IfVisible(alerts);
+
+}
 
 async function fetchStats(){
   try{
@@ -612,11 +1196,44 @@ function updateUI(js) {
 
    // Market (only if tab visible)
   if(!document.getElementById('tab-market').classList.contains('hidden')){
-    updateMarket(js.market);
+    updateMarket(js.market, js.alerts);
   }
 
+  document.getElementById('state-filter').addEventListener('change', () => {
+    if(lastStats) updateMarket(lastStats.market, lastStats.alerts);
+  });
   // --- Updated Timestamp ---
   document.getElementById('updated').textContent = new Date().toLocaleTimeString();
+}
+
+const tvModal = document.getElementById('tv-modal');
+const tvChartContainer = document.getElementById('tv-chart');
+document.getElementById('close-tv').addEventListener('click', () => tvModal.classList.add('hidden'));
+
+function openTradingView(symbol, support, resistance) {
+  tvModal.classList.remove('hidden');
+  tvChartContainer.innerHTML = ""; // reset previous chart
+
+  new TradingView.widget({
+    width: "100%",
+    height: 400,
+    symbol: symbol,
+    interval: "D",
+    timezone: "Etc/UTC",
+    theme: "dark",
+    style: "1",
+    container_id: "tv-chart",
+    studies_overrides: {},
+    overrides: {
+      "paneProperties.background": "#0f172a",
+      "paneProperties.gridProperties.color": "#1e293b"
+    },
+    onChartReady: function(chart) {
+      // Add horizontal lines for support & resistance
+      if (support !== undefined) chart.createMultipointShape([{ time: Date.now(), price: support }], { shape: 'horizontal_line', color: 'green' });
+      if (resistance !== undefined) chart.createMultipointShape([{ time: Date.now(), price: resistance }], { shape: 'horizontal_line', color: 'red' });
+    }
+  });
 }
 
 // poll

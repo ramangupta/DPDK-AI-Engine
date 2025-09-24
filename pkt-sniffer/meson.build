@@ -92,6 +92,12 @@ market_src = files(
   'parsers/market/parse_itch.c',
   'parsers/market/parse_sbe.c',
   'parsers/market/parse_data.c',
+  'anomaly/anomaly.c',
+  'anomaly/fno_data.c',
+  'anomaly/futures_options.c',
+  'anomaly/rule_based/burst_detection.c',
+  'anomaly/rule_based/inter_arrival.c',
+  'anomaly/rule_based/protocol_coverage.c',
 )
 
 all_src = engine_src + parser_src + stats_src + utils_src + ai_src +  market_src + files(

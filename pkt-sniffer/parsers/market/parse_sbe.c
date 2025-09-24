@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
+#include "anomaly/anomaly.h"  // common header
 
 void parse_sbe_message(const uint8_t *buf, size_t len, market_data_view *mdv) {
     if (len == 0) return;
@@ -108,7 +108,25 @@ void parse_sbe(pkt_view *pv) {
     // Missing part: update global data
     market_data_view *global_view = market_view_get();
     for (size_t i = 0; i < mdv.count; i++) {
-        market_view_add(global_view, &mdv.msgs[i]);
+         market_msg_t *m = &mdv.msgs[i];
+        int idx = hash_symbol(m->symbol);
+        interval_counts[idx]++;
+
+        if (symbol_table[idx][0] == '\0') {
+            strncpy(symbol_table[idx], m->symbol, sizeof(symbol_table[idx]) - 1);
+            symbol_table[idx][sizeof(symbol_table[idx]) - 1] = '\0';
+        }
+
+        if (!m->symbol[0]) continue;
+
+        // Inter-arrival
+        prev_ts[idx] = m->timestamp;
+
+        // Protocol coverage
+        sbe_count[idx]++;
+
+        // Add to global view
+        market_view_add(global_view, m);
     }
 
     free(mdv.msgs);

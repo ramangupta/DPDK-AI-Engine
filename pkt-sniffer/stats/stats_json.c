@@ -11,30 +11,130 @@
 #include "stats/stats_json.h"
 #include "parsers/market/parse_data.h"
 
+#include "anomaly/anomaly.h"
+#include "anomaly/futures_options.h"
+
+#if 0
+anomaly_state_t* anomaly_lookup(const char *symbol) {
+    for (int i = 0; i < MAX_SYMBOLS; i++) {
+        if (anomaly_states[i].symbol[0] &&
+            strcmp(anomaly_states[i].symbol, symbol) == 0) {
+            return &anomaly_states[i];
+        }
+    }
+    // allocate new slot if empty
+    for (int i = 0; i < MAX_SYMBOLS; i++) {
+        if (anomaly_states[i].symbol[0] == '\0') {
+            strncpy(anomaly_states[i].symbol, symbol,
+                    sizeof(anomaly_states[i].symbol) - 1);
+            anomaly_states[i].symbol[sizeof(anomaly_states[i].symbol) - 1] = '\0';
+            return &anomaly_states[i];
+        }
+    }
+    return NULL; // no space
+}
+#endif
+
+void json_add_alerts(struct json_object *root) 
+{
+    struct json_object *arr = json_object_new_array();
+
+    for (int i = 0; i < MAX_SYMBOLS; i++) {
+        anomaly_state_t *s = &anomaly_states[i];
+        if (!s->symbol[0]) continue;
+
+        if (s->burst_alert_msg[0]) {
+            struct json_object *obj = json_object_new_object();
+            json_object_object_add(obj, "symbol", json_object_new_string(s->symbol));
+            json_object_object_add(obj, "type", json_object_new_string("burst"));
+            json_object_object_add(obj, "msg", json_object_new_string(s->burst_alert_msg));
+            printf("RAMAN: Burst alert msg %s\n", s->burst_alert_msg);
+            json_object_array_add(arr, obj);
+
+            s->burst_alert_msg[0] = '\0'; // clear after sending
+        }
+        #if 0
+        if (s->protocol_alert_msg[0]) {
+            struct json_object *obj = json_object_new_object();
+            json_object_object_add(obj, "symbol", json_object_new_string(s->symbol));
+            json_object_object_add(obj, "type", json_object_new_string("protocol"));
+            json_object_object_add(obj, "msg", json_object_new_string(s->protocol_alert_msg));
+            json_object_array_add(arr, obj);
+
+            s->protocol_alert_msg[0] = '\0'; // clear after sending
+        }
+#endif        
+        if (s->delay_alert_msg[0]) {
+            struct json_object *obj = json_object_new_object();
+            json_object_object_add(obj, "symbol", json_object_new_string(s->symbol));
+            json_object_object_add(obj, "type", json_object_new_string("delay"));
+            json_object_object_add(obj, "msg", json_object_new_string(s->delay_alert_msg));
+            json_object_array_add(arr, obj);
+            // … same pattern …
+            s->delay_alert_msg[0] = '\0';
+        }
+
+    }
+
+    json_object_object_add(root, "alerts", arr);
+}
+
 void json_add_market(struct json_object *root)
 {
     market_data_view *view = market_view_get();
     if (!view || view->count == 0) return;
 
     struct json_object *arr = json_object_new_array();
+
     for (size_t i = 0; i < view->count; i++) {
         market_msg_t *m = &view->msgs[i];
-        struct json_object *obj = json_object_new_object();
+        fno_symbol_t *fno = fno_get_symbol(m->symbol);
+        if (!fno) continue;
 
-        json_object_object_add(obj, "type", json_object_new_string(m->type));
-        json_object_object_add(obj, "protocol", json_object_new_string(m->protocol));
-        json_object_object_add(obj, "symbol", json_object_new_string(m->symbol));
-        json_object_object_add(obj, "price", json_object_new_double(m->price));
-        json_object_object_add(obj, "bid_price", json_object_new_double(m->bid_price));
-        json_object_object_add(obj, "ask_price", json_object_new_double(m->ask_price));
-        json_object_object_add(obj, "qty", json_object_new_int64(m->quantity));
-        json_object_object_add(obj, "side", json_object_new_string(&m->side));
-        json_object_object_add(obj, "timestamp", json_object_new_int64(m->timestamp));
-        json_object_object_add(obj, "seq_num", json_object_new_int64(m->seq_num));
-        json_object_object_add(obj, "exchange", json_object_new_string(m->exchange));
-        json_object_object_add(obj, "order_id", json_object_new_string(m->order_id));
-        json_object_object_add(obj, "exec_id", json_object_new_string(m->exec_id));
-        json_object_object_add(obj, "order_type", json_object_new_string(&m->order_type));
+        pthread_mutex_lock(&fno->lock);
+
+        struct json_object *obj = json_object_new_object(); 
+
+        json_object_object_add(obj, "symbol", json_object_new_string(fno->symbol));
+        json_object_object_add(obj, "price", json_object_new_double(fno->current_price));
+
+        // OHLC as one string column
+        // Build OHLC array [open, high, low, prev_close]
+        // Build OHLC object {open: x, high: y, low: z, prev_close: w}
+        json_object *ohlc_obj = json_object_new_object();
+        json_object_object_add(ohlc_obj, "open",  json_object_new_double(fno->day_open));
+        json_object_object_add(ohlc_obj, "high",  json_object_new_double(fno->day_high));
+        json_object_object_add(ohlc_obj, "low",   json_object_new_double(fno->day_low));
+        json_object_object_add(ohlc_obj, "close", json_object_new_double(fno->prev_close));
+        json_object_object_add(obj, "ohlc", ohlc_obj);
+
+        // Resistance / Support
+        json_object_object_add(obj, "support", json_object_new_double(fno->support));
+        json_object_object_add(obj, "resistance", json_object_new_double(fno->resistance));
+
+        // State, RS%, CCI
+        json_object_object_add(obj, "state", json_object_new_int(fno->state));
+        json_object_object_add(obj, "rs_diff_pct", json_object_new_double(fno->rs_diff_pct));
+        json_object_object_add(obj, "cci", json_object_new_int(fno->cci));
+        json_object_object_add(obj, "atr", json_object_new_double(fno->atr));
+
+        // 52-week high / low
+        json_object_object_add(obj, "high_52wk", json_object_new_double(fno->high_52wk));
+        json_object_object_add(obj, "low_52wk", json_object_new_double(fno->low_52wk));
+
+        json_object_object_add(obj, "timestamp", json_object_new_int64((int64_t)time(NULL) * 1000));
+        json_object_object_add(obj, "category", json_object_new_int(fno->category));
+        
+        json_object *vol_arr = json_object_new_array();
+        for (int i = 0; i < 4; i++)
+            json_object_array_add(vol_arr, json_object_new_double(fno->vol[i]));
+        json_object_object_add(obj, "vol", vol_arr);
+
+        json_object_object_add(obj, "avg_vol_10d", json_object_new_double(fno->avg_volume_10d));
+        json_object_object_add(obj, "avg_vol_3m", json_object_new_double(fno->avg_volume_3m));
+        json_object_object_add(obj, "remark", json_object_new_string(fno->remark));
+        pthread_mutex_unlock(&fno->lock);
+
         json_object_array_add(arr, obj);
     }
 
@@ -321,7 +421,7 @@ struct json_object *stats_build_json(void) {
     json_object_object_add(root, "cumulative", cum);
 
     json_add_market(root);
-
+    json_add_alerts(root);
     return root;
 }
 

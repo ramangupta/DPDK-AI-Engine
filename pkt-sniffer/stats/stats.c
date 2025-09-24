@@ -24,6 +24,8 @@
 #include "parsers/tcp_reass.h"
 #include "parsers/frag_ipv4.h"
 #include "parsers/parse_dns.h"
+#include "anomaly/anomaly.h"
+#include "anomaly/futures_options.h"
 
 struct stats global_stats = {0};
 static uint64_t total_pkts = 0;
@@ -453,21 +455,18 @@ void stats_poll(void) {
     static uint64_t last_report = 0;
     static uint64_t last_maint  = 0;
 
-    uint64_t curr_tsc = now_tsc();  // call the function
-    uint64_t now_sec;
-    uint64_t now_ns;
-
-
+    uint64_t curr_tsc = now_tsc();
+    uint64_t now_sec, now_ns;
 
 #ifdef USE_DPDK
     uint64_t hz = rte_get_tsc_hz();
-    if (hz == 0) hz = 1; // prevent division by zero
+    if (hz == 0) hz = 1;
     now_sec = curr_tsc / hz;
     now_ns  = (curr_tsc * 1000000000ULL) / hz;
 #else
-    if (curr_tsc == 0) curr_tsc = 1; // prevent division by zero (if needed)
+    if (curr_tsc == 0) curr_tsc = 1;
     now_sec = curr_tsc / 1000000000ULL;
-    now_ns  = curr_tsc % 1000000000ULL; // remainder in ns
+    now_ns  = curr_tsc % 1000000000ULL;
 #endif
 
     if (last_report == 0) {
@@ -476,8 +475,8 @@ void stats_poll(void) {
         return;
     }
 
-   if (now_sec - last_report >= REPORT_INTERVAL) {
-
+    // -------- Stats reporting --------
+    if (now_sec - last_report >= REPORT_INTERVAL) {
 #ifdef USE_DPDK
         if (capture_port >= 0) {
             struct rte_eth_stats eth_stats;
@@ -491,28 +490,32 @@ void stats_poll(void) {
         clock_gettime(CLOCK_MONOTONIC, &start_ts);
 
         perf_update_runtime();
-        // Periodic JSON/machine output
-        write_stats_json();
+        write_stats_json();    // periodic JSON/machine output
 
         clock_gettime(CLOCK_MONOTONIC, &end_ts);
-
-        // Update cumulative stats write time (ns)
         perf_stats.stats_write_ns +=
-            (end_ts.tv_sec - start_ts.tv_sec) * 1e9 + (end_ts.tv_nsec - start_ts.tv_nsec);
-        // Optional console summary
+            (end_ts.tv_sec - start_ts.tv_sec) * 1e9 +
+            (end_ts.tv_nsec - start_ts.tv_nsec);
+
         if (g_filters.console_stats) {
-            stats_report();   // prints human-readable summary
+            stats_report();   // optional console dump
         }
 
         last_report = now_sec;
     }
 
+    // -------- Anomaly detection --------
+    anomaly_detection();
+
+    // Hook into rollover
+    fno_check_rollover();
+
+    // -------- Periodic maintenance --------
     if (now_sec - last_maint >= 1) {
         tcp_reass_periodic_maintenance(now_sec);
         flow_expire(now_ns);
         dns_expire(now_ns);
 
-        // --- Flush stale IPv4/IPv6 fragments ---
         frag_ipv4_flush_stale(now_ns);
         frag_ipv6_flush_stale(now_ns);
         last_maint = now_sec;

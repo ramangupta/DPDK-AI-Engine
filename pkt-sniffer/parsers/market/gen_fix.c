@@ -37,11 +37,14 @@ int generate_fix_message(char *buf, size_t buf_size,
                          const char *order_id,
                          const char *exec_id,
                          char order_type,
-                         const char *exchange) {
+                         const char *exchange,
+                         uint32_t oi, int cci) // <-- new fields
+{
     char body[512];
     char header[64];
     char tmp[1024];
 
+    static uint32_t seq_num = 1;   // internal counter
     // 1. Generate current UTC timestamp with milliseconds
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -53,24 +56,48 @@ int generate_fix_message(char *buf, size_t buf_size,
              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000);
 
+    char safe_symbol[32];
+    strncpy(safe_symbol, symbol, sizeof(safe_symbol) - 1);
+    safe_symbol[sizeof(safe_symbol) - 1] = '\0';
+
+    // 2. Build body (fields after 9=...)
     // 2. Build body (fields after 9=...)
     int body_len = snprintf(body, sizeof(body),
-        "35=8%c52=%s%c55=%s%c44=%.2f%c38=%u%c54=%c%c34=%u%c"
-        "37=%s%c17=%s%c40=%c%c207=%s%c",
+        "35=8%c"
+        "52=%s%c"
+        "55=%s%c"
+        "44=%.2f%c"
+        "38=%u%c"
+        "54=%c%c"
+        "34=%u%c"
+        "37=%s%c"
+        "17=%s%c"
+        "40=%c%c"
+        "207=%s%c"
+        "1000=%u%c"   // OI
+        "1001=%d%c",  // CCI
         FIX_SOH,
         timestamp, FIX_SOH,
-        symbol, FIX_SOH,
+        safe_symbol, FIX_SOH,
         price, FIX_SOH,
         qty, FIX_SOH,
         side, FIX_SOH,
         seq_num, FIX_SOH,
         order_id ? order_id : "ORD0", FIX_SOH,
         exec_id ? exec_id : "EXEC0", FIX_SOH,
-        order_type ? order_type : '2', FIX_SOH,   // default Limit
-        exchange ? exchange : "XNSE", FIX_SOH
+        order_type ? order_type : '2', FIX_SOH,
+        exchange ? exchange : "XNSE", FIX_SOH,
+        oi, FIX_SOH,
+        cci, FIX_SOH
     );
+
     if (body_len < 0 || body_len >= (int)sizeof(body)) return -1;
 
+    for (int i = 0; i < body_len; i++) {
+        putchar(body[i] == FIX_SOH ? '|' : body[i]);
+    }
+    putchar('\n');
+    
     // 3. Header with exact BodyLength
     int hdr_len = snprintf(header, sizeof(header),
         "8=FIX.4.4%c9=%d%c",
@@ -122,6 +149,9 @@ static size_t generate_fix_stream(uint8_t *buf, size_t buf_size,
         snprintf(order_id, sizeof(order_id), "ORD%zu", i + 1);
         snprintf(exec_id, sizeof(exec_id), "EXEC%zu", i + 1);
 
+        uint64_t oi = (rand() % 100000) + 50000;   // random OI
+        int cci = (rand() % 200) - 100;            // random CCI, e.g., -100..+100
+
         int n = generate_fix_message((char *)(buf + offset),
                                      buf_size - offset,
                                      symbol,
@@ -131,7 +161,8 @@ static size_t generate_fix_stream(uint8_t *buf, size_t buf_size,
                                      order_id,
                                      exec_id,
                                      order_type,
-                                     exchange);
+                                     exchange, oi,
+                                     cci);
 
         if (n <= 0 || offset + n >= buf_size) {
             break;  // buffer full or error
@@ -146,9 +177,10 @@ static size_t generate_fix_stream(uint8_t *buf, size_t buf_size,
 
 // --- Public wrapper called from main ---
 size_t generate_FIX(uint8_t *buf, size_t buf_size) {
-    // For now: generate 10 messages for symbol RELIANCE
-    const char *symbol = "RELIANCE";
-    size_t num_msgs = 10;
+    static FILE *fifo = NULL;
+    if (!fifo) fifo = fopen("/tmp/fix_pipe", "rb");
+    if (!fifo) return 0;
 
-    return generate_fix_stream(buf, buf_size, num_msgs, symbol);
+    size_t n = fread(buf, 1, buf_size, fifo);
+    return n;
 }
